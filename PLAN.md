@@ -3,8 +3,10 @@
 A small, fast HTTP service that runs in Docker, loads Typst templates from a
 mounted folder, exposes one render endpoint per template, and returns a
 **PDF/A-3b** document built from the JSON variables you send. It supports
-**Bangla and English** text, each in its own font, and fetches **images passed
-as public URLs**.
+**Bangla and English** text, each in its own font, and supports **hybrid
+images**:
+- static files stored in the template folder (e.g. the company logo);
+- dynamic images passed as public URLs in the request (e.g. product photos).
 
 ```
 your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf ──▶ application/pdf (PDF/A-3b)
@@ -20,8 +22,13 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 - Bangla (বাংলা) and English shape correctly, including Bangla conjuncts
   (যুক্তাক্ষর), vowel signs (কার) and reph. Each script uses its own font, even
   inside one sentence.
-- Image variables are given as public URLs. The service fetches them, caches
-  them and embeds them.
+- Hybrid images:
+  - Static images (logos, stamps, backgrounds) live in the template folder and
+    are loaded once at startup.
+  - Dynamic images (product photos) arrive as URLs in the request. The service
+    fetches, caches, resizes and embeds them.
+  - A missing or broken dynamic image can fall back to a file such as
+    `no-photo.png`.
 - Fast: a few ms to tens of ms per typical invoice when images are cached, with
   no process spawn per request.
 - Stateless and horizontally scalable. One small Docker image.
@@ -46,7 +53,8 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 | Text shaping | Typst's built-in shaper (rustybuzz, a HarfBuzz port) | Handles the Bengali shaping rules (conjuncts, reph, pre-base vowel reordering). |
 | Bangla/English fonts | Per-script font lists using Typst's `covers` (Unicode range regex) | Bangla characters always use the Bangla font and Latin characters always use the English font. See section 4. |
 | HTTP | `axum` + `tokio` | Fast, minimal, good ecosystem. |
-| Image fetching | `reqwest` (rustls) + `moka` LRU cache | Fetches in parallel with timeouts, and repeated images such as logos and signatures load from memory. |
+| Images | Static files in memory + URL fetch with `reqwest` (rustls) and a `moka` LRU cache | Static files cost no I/O per request. URLs are fetched in parallel, and repeated products load from memory. |
+| Image resizing | `image` crate with a per-field `max_px` | Large product photos are shrunk once and cached, which keeps PDFs small and rendering fast. |
 | CPU work | Bounded blocking pool (`spawn_blocking` + `Semaphore`) | Typst compile is CPU-bound and must not block the async runtime. |
 | Fonts | Baked into the image and loaded **once** at startup into a shared `FontBook` | Font scanning is the most expensive cold-start step. |
 | Variable injection | A virtual file `/data.json` served by our `World` | Templates read `#let data = json("/data.json")`. Works with nested objects and arrays such as line items. |
@@ -59,8 +67,9 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 3. **Typst's incremental engine (`comemo`).** Repeated compiles of the same
    template with different data reuse memoized work. A periodic
    `comemo::evict(n)` keeps memory bounded.
-4. **Images cached in memory.** A URL is fetched once and then served from the
-   LRU cache. Fetches within one request run in parallel.
+4. **Images in memory.** Static template images are preloaded at startup.
+   Each URL image is fetched (and resized) once, then served from the LRU
+   cache. Fetches within one request run in parallel.
 5. **Parallel renders.** N concurrent renders, with N = CPU cores by default.
 
 Target numbers to check in benchmarks:
@@ -78,13 +87,17 @@ template and one endpoint:
 ```
 templates/
 ├── _shared/
-│   └── lang.typ          # shared font setup, digit-aware number helpers
+│   ├── lang.typ          # shared font setup, digit-aware number helpers
+│   └── assets/           # static images shared by all templates
+│       ├── no-photo.png  #   fallback for missing product photos
+│       └── stamp.png     #   company stamp used on every invoice
 ├── invoice-retail/
 │   ├── main.typ          # required: entry point
 │   ├── schema.json       # optional: JSON Schema for the input
 │   ├── manifest.toml     # optional: metadata, image fields, overrides
 │   ├── sample.json       # optional: used by /preview and tests
-│   └── assets/logo.png   # optional: static images, sub-modules, etc.
+│   └── assets/           # static images for this template only
+│       └── logo.png      #   company logo: never changes, so it's a file
 ├── invoice-healthcare/
 ├── invoice-logistics/
 └── invoice-construction/
@@ -104,15 +117,16 @@ Example `main.typ`:
 
 #set page(paper: "a4", margin: 2cm)
 
-#image(data.company_logo, width: 4cm)                // image from URL variable
+#image("assets/logo.png", width: 4cm)               // STATIC: file in template folder
 = চালান / Invoice #data.invoice_no
 *গ্রাহক / Billed to:* #data.customer.name \
 #data.customer.address
 
 #table(
-  columns: (1fr, auto, auto, auto),
-  [*পণ্য / Item*], [*পরিমাণ / Qty*], [*দর / Price*], [*মোট / Total*],
+  columns: (auto, 1fr, auto, auto, auto),
+  [], [*পণ্য / Item*], [*পরিমাণ / Qty*], [*দর / Price*], [*মোট / Total*],
   ..data.items.map(i => (
+    image(i.photo, width: 1.2cm),                    // DYNAMIC: URL from request
     i.name, str(i.qty), str(i.price),
     // computed value uses the same digits as its input (৪৫০ → ৯০০, 450 → 900)
     digits-like(num(i.qty) * num(i.price), i.price),
@@ -121,8 +135,12 @@ Example `main.typ`:
 
 *সর্বমোট / Grand total:* ৳ #data.total            // printed exactly as sent
 
-#if "signature" in data [ #image(data.signature, height: 1.5cm) ]
+#image("/_shared/assets/stamp.png", height: 2cm)   // STATIC: shared file
 ```
+
+`image(...)` is the same call in both cases. A static image uses a literal
+path. A dynamic image uses a data field, which the service has already
+replaced with the fetched file (see section 6).
 
 `manifest.toml`:
 
@@ -132,9 +150,15 @@ route = "invoice-retail"          # defaults to folder name
 max_body_kb = 512
 timeout_ms = 5000
 
-# Fields in the payload that hold image URLs (JSON pointers; [] = every array item)
-images = ["/company_logo", "/signature", "/items/[]/photo"]
-on_image_error = "fail"           # "fail" (422) | "placeholder" (transparent 1×1 image)
+# Dynamic image fields (JSON pointers; [] = every array item)
+[images."/items/[]/photo"]
+max_px   = 400                         # downscale longest side (keeps PDF small)
+fallback = "/_shared/assets/no-photo.png"  # used when missing, empty or failing
+on_error = "fallback"                  # "fallback" | "fail" (422)
+
+[images."/signature"]
+optional = true                        # field may be absent
+on_error = "fail"
 ```
 
 ---
@@ -258,27 +282,56 @@ Bangla digits should send Bangla digits. The service does not decide for them.
 
 ---
 
-## 6. Image variables (public URLs)
+## 6. Images: static files + dynamic URLs (hybrid)
+
+### Two sources, one `image()` call
+
+| | Static (file) | Dynamic (URL) |
+|---|---|---|
+| Example | Company logo, stamp, watermark | Product photos, customer-specific images |
+| Where it lives | `templates/<name>/assets/` or `templates/_shared/assets/` | Your cloud storage or CDN (S3, R2, Cloudinary, ...) |
+| How the template uses it | `#image("assets/logo.png")` | `#image(i.photo)`, where `photo` is a URL in the request |
+| Declared in manifest? | No | Yes, under `[images."<pointer>"]` |
+| Loaded | Once at startup, kept in memory; reloaded on file change | Per request, from the LRU cache or the network |
+
+### Values a dynamic image field accepts
+The service decides how to load each value by its form:
+
+| Value in request | Resolved as |
+|---|---|
+| `"https://cdn.example.com/p/rice.jpg"` | Fetched over HTTP(S) and cached |
+| `"data:image/png;base64,..."` | Decoded inline, with no network |
+| `"assets/sign/manager.png"` | A **file** in the template folder, or under `_shared/` if it starts with `/_shared/`. Lets the caller choose between a few stored files, such as signatures, without a URL. |
+| missing, `null` or `""` | The field's `fallback` file, or an error if there is no fallback and the field isn't `optional` |
+
+File paths are sandboxed to `/templates`, so `../` and absolute system paths
+are rejected.
 
 ### Flow per request
 1. Validate the JSON against `schema.json` (if present).
-2. Collect every URL at the manifest's `images` pointers.
-3. Fetch them **in parallel**, using the cache first.
-4. Store each image's bytes as a virtual file
-   `/__img/<sha256-of-url>.<ext>` in the request's `World`.
-5. Rewrite the JSON value from the URL to that virtual path.
-6. Compile. The template just calls `#image(data.company_logo)`.
+2. Walk the manifest's `[images]` pointers and collect every value.
+3. Resolve them **in parallel**:
+   - files come from memory;
+   - URLs come from the cache, or are fetched on a miss;
+   - `data:` URIs are decoded.
 
-The template never sees the network. It only reads the rewritten path.
+   At most `IMAGE_FETCH_CONCURRENCY` downloads run at a time per request.
+4. Downscale to `max_px` if set. The resized result is what gets cached.
+5. Store each result as a virtual file `/__img/<sha256>.<ext>` and rewrite the
+   JSON value to that path.
+6. Compile. The template only ever sees a path, never a URL.
 
-### Fetcher rules
+With 50 product lines, all 50 photos download concurrently. The second
+invoice that uses the same products downloads nothing.
+
+### Fetcher rules (URL images)
 - Only `http`/`https`, with a maximum of 3 redirects, checking every hop.
 - Limits:
   - `IMAGE_MAX_BYTES` (default 5 MB), enforced while streaming;
   - `IMAGE_FETCH_TIMEOUT_MS` (default 3000);
-  - `IMAGE_MAX_PER_REQUEST` (default 20).
+  - `IMAGE_MAX_PER_REQUEST` (default 200, enough for long product invoices).
 - Format is checked by magic bytes (PNG, JPEG, GIF, WebP, SVG), not by the
-  `Content-Type` header.
+  `Content-Type` header. The same check applies to static files at load time.
 - **SSRF protection:** the hostname is resolved, and private, loopback,
   link-local and cloud-metadata addresses (10/8, 172.16/12, 192.168/16,
   127/8, 169.254/16, ::1, fc00::/7) are rejected. This always applies.
@@ -290,16 +343,16 @@ The template never sees the network. It only reads the rewritten path.
   - The check applies to every redirect hop.
   - When the variable is unset or empty, any public host is allowed. A
     disallowed host returns a 422 naming the field and URL.
-- **Cache:** an in-memory `moka` LRU keyed by URL, with a byte budget
-  (`IMAGE_CACHE_MB`, default 256) and a TTL that follows the image's
+- **Cache:** an in-memory `moka` LRU keyed by URL + `max_px`, with a byte
+  budget (`IMAGE_CACHE_MB`, default 256) and a TTL that follows the image's
   `Cache-Control` header (default 1 h). Identical concurrent fetches are
   merged into one.
-- **On failure:** `on_image_error = "fail"` returns
-  `422 {"error":"image","details":[{"path":"/signature","url":"...","msg":"timeout"}]}`.
-  `"placeholder"` substitutes a transparent image and adds an
-  `X-Render-Warnings` header.
-- **Also accepted:** `data:image/png;base64,...` URIs, for callers that want to
-  avoid the round-trip.
+- **On failure, per field:**
+  - `on_error = "fallback"` uses the field's fallback file and adds an
+    `X-Render-Warnings` header listing what failed. This suits product photos:
+    one dead link should not block an invoice.
+  - `on_error = "fail"` returns
+    `422 {"error":"image","details":[{"path":"/items/3/photo","url":"...","msg":"timeout"}]}`.
 
 ---
 
@@ -307,7 +360,7 @@ The template never sees the network. It only reads the rewritten path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/render/{template}` | Body = JSON variables (including image URLs). Returns `application/pdf` (PDF/A-3b). |
+| `POST` | `/render/{template}` | Body = JSON variables (dynamic images as URLs). Returns `application/pdf` (PDF/A-3b). |
 | `GET`  | `/templates` | Lists templates, with schema, image fields and sample. |
 | `GET`  | `/templates/{template}` | Metadata + JSON schema for one template. |
 | `GET`  | `/preview/{template}` | Renders with `sample.json` (dev aid, can be disabled). |
@@ -329,11 +382,10 @@ Content-Type: application/json
 
 {
   "invoice_no": "R-1001",
-  "company_logo": "https://cdn.example.com/brand/logo.png",
   "customer": { "name": "রহিম এন্টারপ্রাইজ", "address": "মিরপুর, ঢাকা" },
   "items": [ { "name": "চাল (Rice) 5kg", "qty": 2, "price": 450, "photo": "https://cdn.example.com/p/rice.jpg" } ],
   "total": "900.00",
-  "signature": "https://cdn.example.com/sign/manager.png"
+  "signature": "assets/sign/manager.png"
 }
 ```
 
@@ -359,8 +411,10 @@ Content-Type: application/json
 HTTP ──▶ axum ──▶ auth / size limit ──▶ handler
                                           │ 1. schema validate
                                           │ 2. NFC normalize strings
-                                          │ 3. ImageFetcher ──▶ moka cache ──miss──▶ reqwest (SSRF-guarded)
-                                          │      (parallel)      ▲ shared across requests
+                                          │ 3. ImageResolver (parallel)
+                                          │      ├─ file  ──▶ StaticAssets (preloaded, in memory)
+                                          │      ├─ data: ─▶ decode
+                                          │      └─ URL   ──▶ moka cache ──miss──▶ reqwest (SSRF-guarded) ──▶ resize
                                           ▼ 4. rewrite URLs → /__img/<hash>
                           TemplateRegistry (ArcSwap<HashMap>)
                                           │
@@ -383,7 +437,11 @@ src/
 ├── config.rs        # env vars (see §9)
 ├── fonts.rs         # load /fonts once, verify REQUIRED_FONTS → Arc<FontStore>
 ├── registry.rs      # scan templates dir, parse manifest/schema, hot reload
-├── images.rs        # URL extraction by pointer, fetch, SSRF guard, cache, rewrite
+├── images/
+│   ├── mod.rs       # pointer walk, resolve by value form, fallback, rewrite
+│   ├── assets.rs    # static template/_shared assets preloaded in memory
+│   ├── fetch.rs     # URL fetch, SSRF guard, allowlist, LRU cache
+│   └── resize.rs    # max_px downscale
 ├── world.rs         # impl typst::World for RenderWorld (sandboxed file access)
 ├── render.rs        # compile + PDF/A-3b export, diagnostics mapping
 ├── api/
@@ -428,7 +486,8 @@ src/
 | `RENDER_TIMEOUT_MS` | 10000 | Per-render deadline |
 | `IMAGE_FETCH_TIMEOUT_MS` | 3000 | Per-image fetch timeout |
 | `IMAGE_MAX_BYTES` | 5242880 | Per-image size cap |
-| `IMAGE_MAX_PER_REQUEST` | 20 | Image count cap |
+| `IMAGE_MAX_PER_REQUEST` | 200 | Dynamic image count cap |
+| `IMAGE_FETCH_CONCURRENCY` | 16 | Parallel downloads per request |
 | `IMAGE_CACHE_MB` | 256 | Image cache budget |
 | `IMAGE_ALLOWED_HOSTS` | (unset = any public host) | Optional comma-separated allowlist, `*.` wildcard for subdomains |
 | `HOT_RELOAD` | true | Watch templates dir |
@@ -515,10 +574,11 @@ Two deployment modes:
    - **Bangla + English** working, with the shared `lang.typ`, the bundled fonts
      and the per-script `covers` setup.
 2. **M2 – Images + production basics**
-   - URL image variables:
-     - manifest pointers and parallel fetch;
-     - SSRF guard and LRU cache;
-     - `data:` URIs and the error policy.
+   - Hybrid images:
+     - static assets (template and `_shared`) preloaded in memory;
+     - dynamic fields via manifest pointers, resolved as URL, `data:` URI or file;
+     - parallel fetch, SSRF guard, optional allowlist and LRU cache;
+     - `max_px` resize, per-field fallback and error policy.
    - JSON Schema validation, NFC normalization, auth, limits and timeouts.
    - `/healthz`, `/readyz`, `/metrics` and structured logs.
    - Dockerfile + compose.
@@ -550,7 +610,7 @@ curl -X POST http://localhost:8080/render/invoice-healthcare \
 const res = await fetch(`${PDF_URL}/render/invoice-logistics`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Authorization: `Bearer ${KEY}` },
-  body: JSON.stringify(invoice),   // image fields are plain public URLs
+  body: JSON.stringify(invoice),   // product photos are plain public URLs
 });
 const pdf = Buffer.from(await res.arrayBuffer());
 ```
@@ -565,6 +625,7 @@ const pdf = Buffer.from(await res.arrayBuffer());
 | Digits | No conversion. Bangla digits only where the request body or template contains them (see §4). |
 | Image host allowlist | Optional. Set `IMAGE_ALLOWED_HOSTS` to a comma-separated list. When it is unset, any public host is allowed. |
 | PDF/A-3 attachments | Not needed. The output is the PDF only. |
+| Images | Hybrid. Static images are files in the template folder; dynamic images are URLs in the request, with a per-field fallback file. |
 
 ## 15. Open questions
 1. Are Typst `@preview` packages needed? If so, which ones should be
