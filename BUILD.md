@@ -39,21 +39,23 @@ P4–P6 make it production-ready, and P7–P8 make it verified and fast.
 **Goal:** an empty but well-structured Rust project with CI from day one.
 
 **Tasks**
-- [ ] `cargo new rustypdf`, with edition 2024 and `rust-toolchain.toml` pinning a stable version.
-- [ ] Add dependencies, pinning an exact `typst` / `typst-pdf` / `typst-render`
+- [x] `cargo new rustypdf`, with edition 2024 and `rust-toolchain.toml` pinning a stable version.
+- [x] Add dependencies, pinning an exact `typst` / `typst-pdf` / `typst-render`
       version because the Typst API changes between releases:
   - `axum`, `tokio`, `serde`, `serde_json`, `thiserror`, `anyhow`;
   - `tracing`, `tracing-subscriber`.
-- [ ] Create the module skeleton from PLAN.md §8 (empty modules, compiling).
-- [ ] Add `config.rs`, which reads the env vars from PLAN.md §9 with defaults.
-- [ ] Add `fonts/`:
+- [x] Create the module skeleton from PLAN.md §8 (empty modules, compiling).
+- [x] Add `config.rs`, which reads the env vars from PLAN.md §9 with defaults.
+- [x] Add `fonts/`:
   - Noto Sans Bengali and Inter, all weights;
   - their `OFL.txt` licenses;
   - `fonts/README.md` giving the source and version of each.
-- [ ] Add `templates/` with a minimal `hello/main.typ`, for tests.
-- [ ] Add a `justfile` (or `Makefile`) with `fmt`, `lint`, `test`, `run` and `docker`.
-- [ ] Add GitHub Actions CI running `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test`.
-- [ ] Add `.gitignore`, `.dockerignore`, `LICENSE` and a short `README.md`.
+- [x] Add `templates/` with a minimal `hello/main.typ`, for tests.
+- [x] Add a `justfile` (or `Makefile`) with `fmt`, `lint`, `test`, `run` and `docker`.
+- [x] Add GitHub Actions CI running `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test`.
+- [x] Add `.gitignore`, `.dockerignore`, `LICENSE` and a short `README.md`.
+- [x] `scripts/verapdf.sh` + `scripts/check-pdfa.sh` (`just pdfa`): veraPDF 3b
+      on every `sample.json`, also run in CI (pulled forward from P7).
 
 **Done when**
 - `cargo build` and `cargo test` pass locally and in CI.
@@ -67,23 +69,23 @@ P4–P6 make it production-ready, and P7–P8 make it verified and fast.
 process. This is the heart of the project.
 
 **Tasks**
-- [ ] `fonts.rs`:
+- [x] `fonts.rs`:
   - load every font in `FONTS_DIR` once into `Arc<FontStore>` (a `FontBook` plus lazily parsed fonts);
   - fail fast if any of `REQUIRED_FONTS` is missing.
-- [ ] `world.rs`: implement `typst::World` for `RenderWorld`.
+- [x] `world.rs`: implement `typst::World` for `RenderWorld`.
   - Shared parts: `Library`, `FontStore`, and the template file cache.
   - Per-request virtual files: `/data.json`, and `/__img/*` (a stub for now).
   - File access is sandboxed to the template root; reject `..` and paths outside it.
   - `today()` returns the current UTC date.
-- [ ] `render.rs`:
+- [x] `render.rs`:
   - `render(template, json) -> Result<Vec<u8>, RenderError>`;
   - `typst::compile` followed by `typst_pdf::pdf` with
     `PdfStandard::A_3b` and a UTC timestamp;
   - convert Typst diagnostics into `{message, file, line, column, hint}`.
-- [ ] A dev CLI subcommand,
+- [x] A dev CLI subcommand,
       `rustypdf render <template-dir> <data.json> -o out.pdf`, for manual
       testing and later benchmarks.
-- [ ] Unit tests:
+- [x] Unit tests:
   - `hello` renders;
   - a syntax error returns line and column;
   - a sandbox escape is rejected;
@@ -101,30 +103,31 @@ process. This is the heart of the project.
 **Goal:** bilingual text that is always correct, with each script in its own font.
 
 **Tasks**
-- [ ] `templates/_shared/lang.typ`:
+- [x] `templates/_shared/lang.typ`:
   - `setup` applies the per-script font list (Noto Sans Bengali via `covers`
     regex for U+0980–U+09FF and ZWNJ/ZWJ, then Inter) and sets `hyphenate: false`;
   - `num()` parses Bangla or ASCII digits into a number;
   - `digits-like()` prints a computed value in the same digit system as its input;
   - `bn()` marks a Bangla paragraph with `lang: "bn"`.
-- [ ] NFC-normalize every JSON string value before compile (`unicode-normalization`).
-- [ ] Add `templates/bilingual-test/`, a test template with a shaping corpus:
+- [x] NFC-normalize every JSON string value before compile (`unicode-normalization`).
+- [x] Add `templates/bilingual-test/`, a test template with a shaping corpus:
   - conjuncts: ক্ষ, জ্ঞ, ন্ত্র;
   - reph: র্ক;
   - split vowels: কি, কী, কো, কৌ;
   - ৎ and ঁ;
   - ৳ next to Bangla and ASCII digits;
   - mixed Bangla/English sentences, tables and headings.
-- [ ] Golden tests:
+- [x] Golden tests:
   - render page 1 with `typst-render` to PNG;
   - pixel-compare against `tests/golden/*.png`, with a small tolerance;
   - provide a `just golden-update` command to approve changes.
-- [ ] Tests that digits are never converted: ASCII stays ASCII and Bangla stays
+- [x] Tests that digits are never converted: ASCII stays ASCII and Bangla stays
       Bangla. `digits-like` follows its input.
 
 **Done when**
 - The golden images show correct Bangla shaping, checked by eye once by a
-  Bangla reader, and the tests pass.
+  Bangla reader, and the tests pass. *(Pending: the Bangla-reader review of
+  `tests/golden/bilingual-test.png`.)*
 - Text extracted from the PDF shows that Bangla glyphs use Noto Sans Bengali
   and Latin glyphs use Inter.
 - The bilingual PDF still passes veraPDF 3b.
@@ -136,25 +139,25 @@ process. This is the heart of the project.
 **Goal:** the service is callable from other projects.
 
 **Tasks**
-- [ ] `registry.rs`:
+- [x] `registry.rs`:
   - at startup, scan `TEMPLATES_DIR`; every folder with a `main.typ` is a
     template (folders starting with `_` are skipped);
   - store templates as `ArcSwap<HashMap<String, Arc<Template>>>`;
   - test-compile each template once at startup so errors appear immediately.
-- [ ] `POST /render/{template}`:
+- [x] `POST /render/{template}`:
   - JSON body in, `application/pdf` out;
   - supports `?filename=` and `?inline=true`;
   - returns the `X-Render-Time-Ms` header.
-- [ ] Concurrency:
+- [x] Concurrency:
   - a `Semaphore` sized by `MAX_CONCURRENCY`, with compiles run in `spawn_blocking`;
   - `QUEUE_TIMEOUT_MS` returns a 503;
   - `RENDER_TIMEOUT_MS` sets a deadline per render.
-- [ ] Body size limit, returning a 413.
-- [ ] `error.rs`: one JSON error format for 404, 413, 422, 500 and 503 (PLAN.md §7).
-- [ ] `GET /templates`, `GET /templates/{t}`, `GET /healthz` and `GET /readyz`.
-- [ ] A periodic `comemo::evict(30)` task.
-- [ ] Graceful shutdown on SIGTERM that drains in-flight renders.
-- [ ] Integration tests with `axum::Router` + `tower::ServiceExt::oneshot`
+- [x] Body size limit, returning a 413.
+- [x] `error.rs`: one JSON error format for 404, 413, 422, 500 and 503 (PLAN.md §7).
+- [x] `GET /templates`, `GET /templates/{t}`, `GET /healthz` and `GET /readyz`.
+- [x] A periodic `comemo::evict(30)` task.
+- [x] Graceful shutdown on SIGTERM that drains in-flight renders.
+- [x] Integration tests with `axum::Router` + `tower::ServiceExt::oneshot`
       for every endpoint and every error code.
 
 **Done when**

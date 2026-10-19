@@ -7,29 +7,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 rustypdf is a Rust HTTP service, run in Docker. It renders Typst templates
 into **PDF/A-3b** documents from JSON sent to the API.
 
-The repo currently holds only the design:
+Design docs:
 - `PLAN.md` says **what** to build and why (the source of truth for decisions);
 - `BUILD.md` says **in what order**, as phases P0–P9, each with a task checklist and "Done when" criteria.
 
-Work phase by phase in `BUILD.md` order, and tick its checkboxes as tasks
-land. When a decision changes, update `PLAN.md` in the same change.
-Once P0 exists, replace the "planned" notes below with the real commands.
+P0–P3 are done (render core, Bangla + English, HTTP API). Continue with P4 in
+`BUILD.md` order, and tick its checkboxes as tasks land. When a decision
+changes, update `PLAN.md` in the same change.
 
-## Commands (planned in BUILD.md P0, via `justfile`)
+## Commands (`justfile`)
 
 ```bash
 just fmt / just lint / just test / just run / just docker
 cargo test <test_name>                      # single test
-cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs)
+cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs: api, render, golden)
 just golden-update                          # re-approve golden PNGs (only on purpose, give a reason in the PR)
-rustypdf render <template-dir> <data.json> -o out.pdf   # dev CLI: render without HTTP
-verapdf --flavour 3b out.pdf                # PDF/A-3b compliance check
-docker compose up                           # templates mounted read-only at /templates
+just pdfa                                   # render every templates/*/sample.json + veraPDF 3b
+cargo run -- render <template-dir> <data.json> -o out.pdf   # dev CLI: render without HTTP
+scripts/verapdf.sh out.pdf                  # veraPDF 3b (PATH verapdf, else fetched via mvn)
 ```
 
-CI runs `cargo fmt --check`, `cargo clippy -D warnings` and `cargo test`. From
-P7 it also runs veraPDF 3b on every template's `sample.json` output and golden
-PNG tests.
+CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy
+--all-targets -D warnings`, `cargo test` (incl. golden PNGs) and `just pdfa`.
+Without env vars, `TEMPLATES_DIR`/`FONTS_DIR` fall back to `./templates` and
+`./fonts` when `/templates` and `/fonts` don't exist.
+
+Tests: `tests/common/mod.rs` has shared helpers (fonts loaded once, fixed
+timestamp). `tests/fixtures/templates/` holds API-test templates (`greet`,
+`broken`, `slow` whose loop count comes from `data.n`, so tests avoid comemo
+cache hits).
 
 ## Architecture (big picture)
 

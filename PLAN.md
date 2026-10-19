@@ -398,7 +398,17 @@ Content-Type: application/json
 - `413` body too large.
 - `422` validation or image error, naming the field.
 - `500` Typst compile error, including PDF/A violations, with file, line and column.
+  Also a render that exceeds `RENDER_TIMEOUT_MS` (`"error":"render_timeout"`):
+  that is a slow template, not overload, so retrying won't help. The
+  abandoned compile keeps its slot until it finishes, so CPU stays bounded.
 - `503` overloaded, when the render queue is full. The caller can retry.
+
+Every error body has the same shape:
+`{"error": "<kind>", "message": "...", "details": [...]}`. The kinds are
+`not_found`, `payload_too_large`, `validation`, `image`, `compile`,
+`render_timeout`, `overloaded` and `internal`. `details` holds `{path, msg}`
+items for validation errors and `{message, file, line, column, hint}` items
+for compile errors. A `503` also carries `Retry-After: 1`.
 
 **Later:** `POST /render/{template}/batch` returns a ZIP or a merged PDF.
 
@@ -442,7 +452,8 @@ src/
 │   ├── assets.rs    # static template/_shared assets preloaded in memory
 │   ├── fetch.rs     # URL fetch, SSRF guard, allowlist, LRU cache
 │   └── resize.rs    # max_px downscale
-├── world.rs         # impl typst::World for RenderWorld (sandboxed file access)
+├── world.rs         # impl typst::World for RenderWorld; ProjectFiles = in-memory
+│                    #   snapshot of TEMPLATES_DIR (nothing outside it is ever loaded)
 ├── render.rs        # compile + PDF/A-3b export, diagnostics mapping
 ├── api/
 │   ├── mod.rs       # router
@@ -484,6 +495,9 @@ src/
 | `REQUIRED_FONTS` | `Noto Sans Bengali,Inter` | Refuse to start if any is missing |
 | `MAX_CONCURRENCY` | CPU cores | Parallel compiles |
 | `RENDER_TIMEOUT_MS` | 10000 | Per-render deadline |
+| `QUEUE_TIMEOUT_MS` | 5000 | Max wait for a compile slot before a 503 |
+| `MAX_BODY_KB` | 1024 | Request body limit (413 above it); a manifest's `max_body_kb` overrides it per template |
+| `LOG_FORMAT` | text | `json` for structured logs |
 | `IMAGE_FETCH_TIMEOUT_MS` | 3000 | Per-image fetch timeout |
 | `IMAGE_MAX_BYTES` | 5242880 | Per-image size cap |
 | `IMAGE_MAX_PER_REQUEST` | 200 | Dynamic image count cap |
