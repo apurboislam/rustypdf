@@ -78,7 +78,7 @@ template and one endpoint:
 ```
 templates/
 ├── _shared/
-│   └── lang.typ          # shared font setup, Bangla digit helpers, etc.
+│   └── lang.typ          # shared font setup, digit-aware number helpers
 ├── invoice-retail/
 │   ├── main.typ          # required: entry point
 │   ├── schema.json       # optional: JSON Schema for the input
@@ -96,7 +96,7 @@ The template root is `/templates`, so templates can
 Example `main.typ`:
 
 ```typst
-#import "/_shared/lang.typ": setup, bn-num
+#import "/_shared/lang.typ": setup, num, digits-like
 #let data = json("/data.json")
 
 #set document(title: "Invoice " + data.invoice_no)   // PDF/A metadata
@@ -112,10 +112,14 @@ Example `main.typ`:
 #table(
   columns: (1fr, auto, auto, auto),
   [*পণ্য / Item*], [*পরিমাণ / Qty*], [*দর / Price*], [*মোট / Total*],
-  ..data.items.map(i => (i.name, str(i.qty), str(i.price), str(i.qty * i.price))).flatten()
+  ..data.items.map(i => (
+    i.name, str(i.qty), str(i.price),
+    // computed value uses the same digits as its input (৪৫০ → ৯০০, 450 → 900)
+    digits-like(num(i.qty) * num(i.price), i.price),
+  )).flatten()
 )
 
-*সর্বমোট / Grand total:* ৳ #bn-num(data.total)
+*সর্বমোট / Grand total:* ৳ #data.total            // printed exactly as sent
 
 #if "signature" in data [ #image(data.signature, height: 1.5cm) ]
 ```
@@ -141,10 +145,10 @@ on_image_error = "fail"           # "fail" (422) | "placeholder" (transparent 1�
 These are baked into the image under `/fonts` and loaded at startup. Each
 template, or the shared `lang.typ`, chooses which to use.
 
-| Script | Default font | Alternatives |
+| Script | Font (bundled) | Notes |
 |---|---|---|
-| Bangla | **Noto Sans Bengali** / Noto Serif Bengali (OFL) | Hind Siliguri, Tiro Bangla, Anek Bangla (all OFL) |
-| English | **Inter** / Noto Sans (OFL) | Roboto, Source Sans 3, or a brand font in `/fonts` |
+| Bangla | **Noto Sans Bengali** (OFL), all weights | The default and required Bangla font |
+| English | **Inter** (OFL), all weights | Can be swapped for a brand font in `/fonts` |
 
 Any extra `.ttf`/`.otf` files mounted into `/fonts` are picked up as well, for
 example a brand font. At startup the service checks that every font named in
@@ -175,19 +179,46 @@ are mixed in one line:
   body
 }
 
-// 1234.50 → ১২৩৪.৫০
-#let bn-num(n) = str(n).clusters().map(c => {
-  let d = "০১২৩৪৫৬৭৮৯"
-  if c >= "0" and c <= "9" { d.clusters().at(int(c)) } else { c }
-}).join()
+#let bn-digits = "০১২৩৪৫৬৭৮৯".clusters()
+
+// "১২৩৪.৫০" or "1234.50" or 1234.5 → number, for arithmetic
+#let num(v) = if type(v) == str {
+  float(v.clusters().map(c => {
+    let i = bn-digits.position(d => d == c)
+    if i != none { str(i) } else { c }
+  }).join().replace(",", ""))
+} else { v }
+
+// Format n with Bangla digits only if `ref` (the input it came from) used them
+#let digits-like(n, ref) = {
+  let s = str(n)
+  if type(ref) == str and ref.clusters().any(c => c in bn-digits) {
+    s.clusters().map(c => if c >= "0" and c <= "9" { bn-digits.at(int(c)) } else { c }).join()
+  } else { s }
+}
 
 // Bangla-only paragraph (correct line-breaking language)
 #let bn(body) = text(lang: "bn", body)
 ```
 
 The font list also handles the case where the English font has no Bangla
-glyphs, and the reverse. Templates can still override fonts per element, for
-example a serif Bangla font for headings.
+glyphs, and the reverse. Templates can still override fonts per element.
+
+### Digits rule
+**There is no automatic digit conversion.** Digits print exactly as they
+arrive:
+- Bangla digits (০–৯) in the request body or written in the template print as
+  Bangla digits, in Noto Sans Bengali.
+- ASCII digits (0–9) print as ASCII digits, in Inter.
+
+Typst cannot do arithmetic on Bangla-digit strings, so `lang.typ` provides two
+helpers for templates that compute values (line totals, VAT):
+- `num()` parses either digit system into a number.
+- `digits-like(value, input)` prints the result with Bangla digits only if the
+  input it came from used them.
+
+Callers that want ASCII digits should send ASCII digits, and callers that want
+Bangla digits should send Bangla digits. The service does not decide for them.
 
 ### Correctness checks
 - **Golden image tests:** each template's Bangla sample is rendered to PNG with
@@ -195,8 +226,9 @@ example a serif Bangla font for headings.
   catches shaping or font regressions, such as broken conjuncts or a wrong
   fallback font, when Typst or the fonts are upgraded.
 - **Test corpus:** words that stress the shaper, such as ক্ষ, জ্ঞ, ন্ত্র, র্ক
-  (reph), কি/কী/কো/কৌ (split vowels), ৎ and ঁ, mixed with English and digits in
-  one line.
+  (reph), কি/কী/কো/কৌ (split vowels), ৎ and ঁ, mixed with English in one line.
+  The corpus also covers Bangla and ASCII digits side by side, to check that
+  digits are never converted.
 - **Input normalization:** text is NFC-normalized before compile (with the
   `unicode-normalization` crate), so data from different keyboards and input
   methods shapes the same way.
@@ -216,11 +248,8 @@ example a serif Bangla font for headings.
   displays correctly. Level "u" also requires every glyph to map to Unicode,
   and Bangla conjunct glyphs often can't map cleanly. So 3b is the right
   choice, and Bangla text still remains largely searchable and copyable.
-- **Embedded files (PDF/A-3 feature, optional):** PDF/A-3 allows file
-  attachments. This supports e-invoice formats such as ZUGFeRD/Factur-X, which
-  attach an XML file to the PDF. The API can accept an `attachments` field that
-  is exposed to the template, and Typst's `pdf.attach` (`pdf.embed` in older
-  versions) embeds it. This is planned for M4.
+- **No embedded files:** the output is the PDF alone, with no XML or other
+  attachments.
 - **Verification:** CI runs **veraPDF** (`--flavour 3b`) on the output of every
   template's `sample.json`. The build fails if any of them is non-compliant.
 - Images: PNG/JPEG/GIF/SVG/WebP are re-encoded by Typst in a form PDF/A
@@ -252,9 +281,15 @@ The template never sees the network. It only reads the rewritten path.
   `Content-Type` header.
 - **SSRF protection:** the hostname is resolved, and private, loopback,
   link-local and cloud-metadata addresses (10/8, 172.16/12, 192.168/16,
-  127/8, 169.254/16, ::1, fc00::/7) are rejected. An optional
-  `IMAGE_ALLOWED_HOSTS` allowlist (e.g. `cdn.example.com,*.s3.amazonaws.com`)
-  restricts sources further.
+  127/8, 169.254/16, ::1, fc00::/7) are rejected. This always applies.
+- **Optional host allowlist:** the `IMAGE_ALLOWED_HOSTS` env variable takes a
+  comma-separated list, for example
+  `IMAGE_ALLOWED_HOSTS=cdn.example.com,*.s3.amazonaws.com`.
+  - A `*.` prefix matches any subdomain.
+  - Whitespace is trimmed and matching is case-insensitive.
+  - The check applies to every redirect hop.
+  - When the variable is unset or empty, any public host is allowed. A
+    disallowed host returns a 422 naming the field and URL.
 - **Cache:** an in-memory `moka` LRU keyed by URL, with a byte budget
   (`IMAGE_CACHE_MB`, default 256) and a TTL that follows the image's
   `Cache-Control` header (default 1 h). Identical concurrent fetches are
@@ -313,9 +348,7 @@ Content-Type: application/json
 - `500` Typst compile error, including PDF/A violations, with file, line and column.
 - `503` overloaded, when the render queue is full. The caller can retry.
 
-**Later:**
-- `POST /render/{template}/batch` returns a ZIP or a merged PDF.
-- An `attachments` field for embedded XML (Factur-X/ZUGFeRD).
+**Later:** `POST /render/{template}/batch` returns a ZIP or a merged PDF.
 
 ---
 
@@ -390,14 +423,14 @@ src/
 | `PORT` | 8080 | HTTP port |
 | `TEMPLATES_DIR` / `FONTS_DIR` | `/templates` / `/fonts` | Mount points |
 | `API_KEYS` | (none = auth off) | Comma-separated bearer tokens |
-| `REQUIRED_FONTS` | `Noto Sans Bengali,Inter` | Refuse to start if missing |
+| `REQUIRED_FONTS` | `Noto Sans Bengali,Inter` | Refuse to start if any is missing |
 | `MAX_CONCURRENCY` | CPU cores | Parallel compiles |
 | `RENDER_TIMEOUT_MS` | 10000 | Per-render deadline |
 | `IMAGE_FETCH_TIMEOUT_MS` | 3000 | Per-image fetch timeout |
 | `IMAGE_MAX_BYTES` | 5242880 | Per-image size cap |
 | `IMAGE_MAX_PER_REQUEST` | 20 | Image count cap |
 | `IMAGE_CACHE_MB` | 256 | Image cache budget |
-| `IMAGE_ALLOWED_HOSTS` | (any public) | Optional host allowlist |
+| `IMAGE_ALLOWED_HOSTS` | (unset = any public host) | Optional comma-separated allowlist, `*.` wildcard for subdomains |
 | `HOT_RELOAD` | true | Watch templates dir |
 
 ---
@@ -424,7 +457,7 @@ RUN cargo build --release
 
 FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /app/target/release/rustypdf /rustypdf
-COPY fonts /fonts                 # Noto Sans/Serif Bengali, Hind Siliguri, Inter, Noto Sans (OFL)
+COPY fonts /fonts                 # Noto Sans Bengali + Inter, all weights (OFL)
 ENV TEMPLATES_DIR=/templates FONTS_DIR=/fonts PORT=8080
 EXPOSE 8080
 USER nonroot
@@ -444,7 +477,7 @@ services:
     environment:
       API_KEYS: "change-me"
       MAX_CONCURRENCY: "4"
-      IMAGE_ALLOWED_HOSTS: "cdn.example.com"
+      IMAGE_ALLOWED_HOSTS: "cdn.example.com,*.s3.amazonaws.com"   # optional; omit to allow any public host
       HOT_RELOAD: "true"
 ```
 
@@ -499,7 +532,6 @@ Two deployment modes:
    - Benchmarks (`criterion` + `oha`/`k6`) and tuning.
    - Hot reload, `/preview`, `/templates` listing, offline Typst packages.
 4. **M4 – Extras (optional)**
-   - PDF/A-3 embedded attachments (Factur-X/ZUGFeRD XML).
    - Batch endpoint (ZIP or merged PDF) and a PNG preview of page 1.
    - Client snippets (curl, TS, Python, PHP) and an OpenAPI spec (`utoipa`).
 
@@ -525,15 +557,15 @@ const pdf = Buffer.from(await res.arrayBuffer());
 
 ---
 
-## 14. Open questions
-1. Which Bangla font do you prefer as the default: Noto Sans Bengali (clean,
-   very complete), Hind Siliguri (common in BD web/UI) or Tiro Bangla
-   (traditional)? Any brand fonts?
-2. Should numbers and dates in Bangla templates use Bangla digits (১২৩) by
-   default, or only where the template asks via `bn-num`?
-3. Should image hosts be restricted to an allowlist (your CDN/S3), or should
-   any public host be allowed?
-4. Will you need PDF/A-3 XML attachments for e-invoicing (e.g. NBR/VAT or
-   Factur-X)?
-5. Are Typst `@preview` packages needed? If so, which ones should be
+## 14. Decisions
+
+| Topic | Decision |
+|---|---|
+| Bangla font | Noto Sans Bengali |
+| Digits | No conversion. Bangla digits only where the request body or template contains them (see §4). |
+| Image host allowlist | Optional. Set `IMAGE_ALLOWED_HOSTS` to a comma-separated list. When it is unset, any public host is allowed. |
+| PDF/A-3 attachments | Not needed. The output is the PDF only. |
+
+## 15. Open questions
+1. Are Typst `@preview` packages needed? If so, which ones should be
    pre-bundled in the image?
