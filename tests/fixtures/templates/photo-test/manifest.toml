@@ -1,0 +1,12 @@
+name = "Photo test"
+route = "photos"
+max_body_kb = 64
+timeout_ms = 20000
+
+[images."/items/[]/photo"]
+max_px = 64
+fallback = "/_shared/assets/no-photo.png"
+
+[images."/signature"]
+optional = true
+on_error = "fail"

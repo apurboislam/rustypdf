@@ -53,7 +53,7 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 | Text shaping | Typst's built-in shaper (rustybuzz, a HarfBuzz port) | Handles the Bengali shaping rules (conjuncts, reph, pre-base vowel reordering). |
 | Bangla/English fonts | Per-script font lists using Typst's `covers` (Unicode range regex) | Bangla characters always use the Bangla font and Latin characters always use the English font. See section 4. |
 | HTTP | `axum` + `tokio` | Fast, minimal, good ecosystem. |
-| Images | Static files in memory + URL fetch with `reqwest` (rustls) and a `moka` LRU cache | Static files cost no I/O per request. URLs are fetched in parallel, and repeated products load from memory. |
+| Images | Static files in memory + URL fetch with `reqwest` (rustls, platform CA store) and a `moka` LRU cache | Static files cost no I/O per request. URLs are fetched in parallel, and repeated products load from memory. |
 | Image resizing | `image` crate with a per-field `max_px` | Large product photos are shrunk once and cached, which keeps PDFs small and rendering fast. |
 | CPU work | Bounded blocking pool (`spawn_blocking` + `Semaphore`) | Typst compile is CPU-bound and must not block the async runtime. |
 | Fonts | Baked into the image and loaded **once** at startup into a shared `FontBook` | Font scanning is the most expensive cold-start step. |
@@ -161,6 +161,18 @@ optional = true                        # field may be absent
 on_error = "fail"
 ```
 
+Manifest rules:
+- unknown keys are errors; `route` may only use letters, digits, `-` and `_`;
+- `on_error` defaults to `"fallback"` when the field has a `fallback`, else
+  `"fail"`; `on_error = "fallback"` without a `fallback` file is an error;
+- a `fallback` must name a valid image under an `assets/` folder;
+- a template whose `manifest.toml` or `schema.json` is invalid, or whose route
+  another template already uses, is **skipped** with an error log (on hot
+  reload it keeps its previous version);
+- at startup each template's `sample.json` is validated against its schema,
+  its image fields are resolved without network access (URLs use the field's
+  fallback) and it is compiled; problems are reported by `GET /templates`.
+
 ---
 
 ## 4. Bangla + English support
@@ -266,8 +278,8 @@ Bangla digits should send Bangla digits. The service does not decide for them.
   and XMP metadata. A template that breaks the standard fails at compile time
   with a clear error rather than producing a non-compliant PDF.
 - Metadata: the document title comes from `#set document(...)` in the template.
-  Otherwise the default is `manifest.name`. Author and keywords can come from
-  the manifest.
+  *(Not built yet: defaulting the title to `manifest.name`, and author and
+  keywords from the manifest. Templates set `#set document(...)` themselves.)*
 - Why **3b** suits Bangla: level "b" (basic) only requires that the PDF
   displays correctly. Level "u" also requires every glyph to map to Unicode,
   and Bangla conjunct glyphs often can't map cleanly. So 3b is the right
@@ -301,11 +313,15 @@ The service decides how to load each value by its form:
 |---|---|
 | `"https://cdn.example.com/p/rice.jpg"` | Fetched over HTTP(S) and cached |
 | `"data:image/png;base64,..."` | Decoded inline, with no network |
-| `"assets/sign/manager.png"` | A **file** in the template folder, or under `_shared/` if it starts with `/_shared/`. Lets the caller choose between a few stored files, such as signatures, without a URL. |
+| `"assets/sign/manager.png"` | A **file** in the template's `assets/` folder, or in `_shared/assets/` if it starts with `/_shared/`. Lets the caller choose between a few stored files, such as signatures, without a URL. |
 | missing, `null` or `""` | The field's `fallback` file, or an error if there is no fallback and the field isn't `optional` |
 
-File paths are sandboxed to `/templates`, so `../` and absolute system paths
-are rejected.
+File paths are sandboxed to the `assets/` folders of the template and
+`_shared`: `.`/`..` segments, backslashes, other templates' folders and
+absolute system paths are rejected. Other schemes (`file:`, `ftp:`) and
+non-string values are errors. Static asset files are not resized (`max_px`
+applies to URL and `data:` images); they are checked by magic bytes when the
+templates load, and a file that is not an image is dropped with an error log.
 
 ### Flow per request
 1. Validate the JSON against `schema.json` (if present).
@@ -345,12 +361,20 @@ invoice that uses the same products downloads nothing.
     disallowed host returns a 422 naming the field and URL.
 - **Cache:** an in-memory `moka` LRU keyed by URL + `max_px`, with a byte
   budget (`IMAGE_CACHE_MB`, default 256) and a TTL that follows the image's
-  `Cache-Control` header (default 1 h). Identical concurrent fetches are
-  merged into one.
+  `Cache-Control` header: `max-age` (capped at 24 h), `no-store`/`no-cache`
+  mean not cached, default 1 h. Identical concurrent fetches are merged into
+  one. Failures are not cached.
+- **No proxy:** the fetcher ignores `HTTP(S)_PROXY`, because a proxy resolves
+  names itself and would bypass the SSRF check.
+- Resizing keeps JPEG as JPEG (quality 85, EXIF orientation applied) and
+  turns other raster formats into PNG; SVG is never resized. Decoding is
+  capped at 20000 px per side.
 - **On failure, per field:**
   - `on_error = "fallback"` uses the field's fallback file and adds an
     `X-Render-Warnings` header listing what failed. This suits product photos:
-    one dead link should not block an invoice.
+    one dead link should not block an invoice. The header is a JSON array of
+    `{path, url, msg}` with non-ASCII escaped as `\uXXXX`, at most 4 KiB
+    (overflow summarized as `{"more": n}`).
   - `on_error = "fail"` returns
     `422 {"error":"image","details":[{"path":"/items/3/photo","url":"...","msg":"timeout"}]}`.
 
@@ -363,7 +387,7 @@ invoice that uses the same products downloads nothing.
 | `POST` | `/render/{template}` | Body = JSON variables (dynamic images as URLs). Returns `application/pdf` (PDF/A-3b). |
 | `GET`  | `/templates` | Lists templates, with schema, image fields and sample. |
 | `GET`  | `/templates/{template}` | Metadata + JSON schema for one template. |
-| `GET`  | `/preview/{template}` | Renders with `sample.json` (dev aid, can be disabled). |
+| `GET`  | `/preview/{template}` | Renders with `sample.json` inline (dev aid; `PREVIEW=false` disables it). |
 | `POST` | `/admin/reload` | Re-scans `/templates` (also automatic via file watcher). |
 | `GET`  | `/healthz`, `/readyz` | Liveness and readiness (fonts loaded, templates compiled). |
 | `GET`  | `/metrics` | Prometheus metrics. See below. |
@@ -446,7 +470,8 @@ src/
 ├── main.rs          # config, tracing, startup, graceful shutdown
 ├── config.rs        # env vars (see §9)
 ├── fonts.rs         # load /fonts once, verify REQUIRED_FONTS → Arc<FontStore>
-├── registry.rs      # scan templates dir, parse manifest/schema, hot reload
+├── registry.rs      # scan templates dir, load manifest/schema/sample, hot reload
+├── manifest.rs      # manifest.toml parsing and image-field pointers
 ├── images/
 │   ├── mod.rs       # pointer walk, resolve by value form, fallback, rewrite
 │   ├── assets.rs    # static template/_shared assets preloaded in memory
@@ -505,6 +530,7 @@ src/
 | `IMAGE_CACHE_MB` | 256 | Image cache budget |
 | `IMAGE_ALLOWED_HOSTS` | (unset = any public host) | Optional comma-separated allowlist, `*.` wildcard for subdomains |
 | `HOT_RELOAD` | true | Watch templates dir |
+| `PREVIEW` | true | Serve `GET /preview/{template}` |
 
 ---
 
@@ -554,9 +580,9 @@ services:
       HOT_RELOAD: "true"
 ```
 
-The container needs **outbound HTTPS** to reach image hosts. TLS root
-certificates come from the bundled `webpki-roots`, so the image needs no CA
-package.
+The container needs **outbound HTTPS** to reach image hosts. `reqwest` 0.13
+uses rustls with the platform verifier, which reads the system CA store;
+`distroless/cc` ships `/etc/ssl/certs`, so no extra package is needed.
 
 Two deployment modes:
 - **Mounted templates** (dev and most setups) use the compose file above, with hot reload.

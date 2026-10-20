@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::images::ImageIssue;
 use crate::render::RenderError;
 
 /// One invalid input field.
@@ -22,12 +23,16 @@ pub struct FieldError {
 pub enum AppError {
     #[error("unknown template {0:?}")]
     TemplateNotFound(String),
+    #[error("template {0:?} has no sample.json")]
+    NoSample(String),
     #[error("no route for {0}")]
     RouteNotFound(String),
     #[error("request body exceeds {limit} bytes")]
     PayloadTooLarge { limit: usize },
     #[error("invalid input")]
     Validation(Vec<FieldError>),
+    #[error("an image could not be loaded")]
+    Image(Vec<ImageIssue>),
     #[error(transparent)]
     Render(#[from] RenderError),
     #[error("render exceeded its {0:?} deadline")]
@@ -41,9 +46,11 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
-            Self::TemplateNotFound(_) | Self::RouteNotFound(_) => StatusCode::NOT_FOUND,
+            Self::TemplateNotFound(_) | Self::NoSample(_) | Self::RouteNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
             Self::PayloadTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
-            Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Validation(_) | Self::Image(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Render(_) | Self::RenderTimeout(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -53,9 +60,10 @@ impl AppError {
 
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::TemplateNotFound(_) | Self::RouteNotFound(_) => "not_found",
+            Self::TemplateNotFound(_) | Self::NoSample(_) | Self::RouteNotFound(_) => "not_found",
             Self::PayloadTooLarge { .. } => "payload_too_large",
             Self::Validation(_) => "validation",
+            Self::Image(_) => "image",
             Self::Render(RenderError::MainNotFound(_)) => "internal",
             Self::Render(_) => "compile",
             Self::RenderTimeout(_) => "render_timeout",
@@ -70,6 +78,7 @@ impl IntoResponse for AppError {
         let status = self.status();
         let details = match &self {
             Self::Validation(fields) => json!(fields),
+            Self::Image(issues) => json!(issues),
             Self::Render(err) => json!(err.diagnostics()),
             _ => json!([]),
         };

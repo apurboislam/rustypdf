@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod fonts;
 pub mod images;
+pub mod manifest;
 pub mod registry;
 pub mod render;
 pub mod world;

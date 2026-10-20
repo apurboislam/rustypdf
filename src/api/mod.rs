@@ -17,6 +17,7 @@ use tokio::sync::Semaphore;
 use crate::config::Config;
 use crate::error::AppError;
 use crate::fonts::FontStore;
+use crate::images::fetch::Fetcher;
 use crate::registry::{self, TemplateRegistry};
 use crate::world::Shared;
 
@@ -31,6 +32,8 @@ pub struct AppState {
     pub registry: TemplateRegistry,
     /// One permit per concurrent compile (`MAX_CONCURRENCY`).
     pub compile_slots: Arc<Semaphore>,
+    /// URL image fetcher and its cache, shared by all requests.
+    pub fetcher: Fetcher,
     /// Set once startup finished; cleared when shutdown begins.
     pub ready: AtomicBool,
 }
@@ -38,6 +41,13 @@ pub struct AppState {
 impl AppState {
     /// Loads fonts (failing if a required one is missing) and templates.
     pub fn load(config: Config) -> Result<Arc<Self>> {
+        let fetcher = Fetcher::new(&config);
+        Self::load_with(config, fetcher)
+    }
+
+    /// Like [`AppState::load`], with a given image fetcher (tests use one
+    /// that points at a mock server).
+    pub fn load_with(config: Config, fetcher: Fetcher) -> Result<Arc<Self>> {
         let fonts = FontStore::load(&config.fonts_dir, &config.required_fonts)?;
         tracing::info!(faces = fonts.len(), families = ?fonts.families(), "fonts loaded");
         let shared = Arc::new(Shared::new(Arc::new(fonts)));
@@ -45,6 +55,7 @@ impl AppState {
         tracing::info!(count = templates.len(), dir = %config.templates_dir.display(), "templates loaded");
         Ok(Arc::new(Self {
             compile_slots: Arc::new(Semaphore::new(config.max_concurrency)),
+            fetcher,
             registry: TemplateRegistry::new(templates),
             shared,
             config,
@@ -58,6 +69,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/render/{template}", post(render::render))
         .route("/templates", get(templates::list))
         .route("/templates/{template}", get(templates::info))
+        .route("/preview/{template}", get(templates::preview))
         .route("/healthz", get(ops::healthz))
         .route("/readyz", get(ops::readyz))
         .fallback(|uri: Uri| async move { AppError::RouteNotFound(uri.path().to_owned()) })

@@ -1,0 +1,8 @@
+{
+  "title": "Sample",
+  "items": [
+    { "name": "Rice", "photo": "assets/rice.png" },
+    { "name": "Unknown" }
+  ],
+  "signature": "assets/sign/manager.png"
+}

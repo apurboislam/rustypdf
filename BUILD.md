@@ -173,21 +173,21 @@ process. This is the heart of the project.
 declare their inputs.
 
 **Tasks**
-- [ ] `images/assets.rs`:
+- [x] `images/assets.rs`:
   - preload every file under `<template>/assets/` and `_shared/assets/` into memory;
   - check the format by magic bytes (PNG, JPEG, GIF, WebP, SVG);
   - reject bad files at load time with a clear log message.
-- [ ] Serve those files through `World::file()`, so
+- [x] Serve those files through `World::file()`, so
       `#image("assets/logo.png")` and `#image("/_shared/assets/stamp.png")` work.
-- [ ] `manifest.toml` parsing (`serde` + `toml`):
+- [x] `manifest.toml` parsing (`serde` + `toml`):
   - `name`, `route`, `max_body_kb`, `timeout_ms`;
   - the `[images."<pointer>"]` tables, which are parsed now and used in P5.
-- [ ] `schema.json` validation (`jsonschema`), compiled once per template.
+- [x] `schema.json` validation (`jsonschema`), compiled once per template.
       Invalid input returns a 422 with `{path, msg}` for each error.
-- [ ] `sample.json` + `GET /preview/{template}`, which can be disabled by env.
-- [ ] Image fields in the request that hold a **file path** (e.g.
+- [x] `sample.json` + `GET /preview/{template}`, which can be disabled by env.
+- [x] Image fields in the request that hold a **file path** (e.g.
       `"assets/sign/manager.png"`) resolve to preloaded assets, inside the sandbox.
-- [ ] Tests:
+- [x] Tests:
   - a static logo renders;
   - a missing asset gives a clear error;
   - schema errors list the fields;
@@ -197,6 +197,9 @@ declare their inputs.
 - A template with a logo in `assets/` renders with the logo.
 - Invalid input is rejected with a 422 before any compile work.
 
+*Status: done. Covered by `tests/images.rs` with the `photo-test` fixture
+(served at its manifest route `photos`); the real sector templates come in P7.*
+
 ---
 
 ## P5 — Dynamic images (URLs)
@@ -205,27 +208,27 @@ declare their inputs.
 and safe.
 
 **Tasks**
-- [ ] `images/mod.rs`:
+- [x] `images/mod.rs`:
   - walk the manifest pointers (with `[]` meaning every array item) and decide
     each value's form: URL, `data:` URI, file path, or empty;
   - apply `optional`, `fallback` and `on_error`;
   - rewrite each value to `/__img/<sha256>.<ext>`.
-- [ ] `images/fetch.rs`:
-  - `reqwest` with rustls and `webpki-roots`, allowing only `http` and `https`;
+- [x] `images/fetch.rs`:
+  - `reqwest` with rustls (platform CA store; reqwest 0.13 has no `webpki-roots` feature), allowing only `http` and `https`;
   - a maximum of 3 redirects, checking each hop;
   - streaming size cap (`IMAGE_MAX_BYTES`) and timeout (`IMAGE_FETCH_TIMEOUT_MS`);
   - SSRF guard: resolve DNS and block private, loopback, link-local and metadata ranges;
   - optional `IMAGE_ALLOWED_HOSTS` (comma-separated, `*.` wildcard, case-insensitive).
-- [ ] Cache:
+- [x] Cache:
   - a `moka` LRU keyed by URL + `max_px`, with a byte budget (`IMAGE_CACHE_MB`);
   - a TTL from `Cache-Control`, defaulting to 1 h;
   - identical concurrent fetches merged into one.
-- [ ] Parallel resolution per request, limited by `IMAGE_FETCH_CONCURRENCY`
+- [x] Parallel resolution per request, limited by `IMAGE_FETCH_CONCURRENCY`
       and `IMAGE_MAX_PER_REQUEST`. This runs **before** the request takes a compile slot.
-- [ ] `images/resize.rs`: downscale to `max_px` with the `image` crate before caching.
-- [ ] `data:` URI decoding.
-- [ ] Return the `X-Render-Warnings` and `X-Fetch-Time-Ms` headers.
-- [ ] Tests, using a local mock HTTP server (`wiremock`):
+- [x] `images/resize.rs`: downscale to `max_px` with the `image` crate before caching.
+- [x] `data:` URI decoding.
+- [x] Return the `X-Render-Warnings` and `X-Fetch-Time-Ms` headers.
+- [x] Tests, using a local mock HTTP server (`wiremock`):
   - success;
   - a 404 that uses the fallback;
   - a 404 with `on_error = "fail"` returning a 422;
@@ -242,6 +245,9 @@ and safe.
   makes zero network calls.
 - A broken product link uses `no-photo.png` instead of failing the request.
 - All SSRF and allowlist tests pass.
+
+*Status: done, against the `photo-test` fixture and a `wiremock` server
+(`tests/images.rs`). The retail invoice itself, with `no-photo.png`, comes in P7.*
 
 ---
 

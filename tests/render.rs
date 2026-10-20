@@ -63,7 +63,7 @@ fn data_json_values_appear_in_output() {
 #[test]
 fn syntax_error_reports_line_and_column() {
     let p = project("= Title\n\nok line\n#let x = (1, 2\n");
-    let err = common::compile_in(&p, "/t/main.typ", &json!({})).unwrap_err();
+    let err = common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default()).unwrap_err();
     let RenderError::Compile(diags) = &err else {
         panic!("{err:?}")
     };
@@ -76,7 +76,7 @@ fn syntax_error_reports_line_and_column() {
 #[test]
 fn runtime_error_points_at_the_call() {
     let p = project("#let data = json(\"/data.json\")\n\nName: #data.missing\n");
-    let err = common::compile_in(&p, "/t/main.typ", &json!({})).unwrap_err();
+    let err = common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default()).unwrap_err();
     let d = &err.diagnostics()[0];
     // Column 13 is the `missing` field access in `Name: #data.missing`.
     assert_eq!((d.line, d.column), (Some(3), Some(13)), "{d:?}");
@@ -87,24 +87,25 @@ fn runtime_error_points_at_the_call() {
 fn sandbox_escape_is_rejected() {
     for path in ["../../../../etc/passwd", "/etc/passwd", "/../etc/hostname"] {
         let p = project(&format!("#read(\"{path}\")"));
-        let err = common::compile_in(&p, "/t/main.typ", &json!({}));
+        let err = common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default());
         assert!(err.is_err(), "{path} must not be readable");
     }
     // Real files outside the project root are never loaded.
     let p = project("#read(\"/Cargo.toml\")");
-    assert!(common::compile_in(&p, "/t/main.typ", &json!({})).is_err());
+    assert!(common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default()).is_err());
 }
 
 #[test]
 fn packages_are_unavailable() {
     let p = project("#import \"@preview/example:0.1.0\": *");
-    assert!(common::compile_in(&p, "/t/main.typ", &json!({})).is_err());
+    assert!(common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default()).is_err());
 }
 
 #[test]
 fn missing_main_is_reported() {
     let p = project("hi");
-    let err = common::compile_in(&p, "/nope/main.typ", &json!({})).unwrap_err();
+    let err =
+        common::compile_in(&p, "/nope/main.typ", &json!({}), &Default::default()).unwrap_err();
     assert!(matches!(err, RenderError::MainNotFound(_)));
 }
 
@@ -117,7 +118,7 @@ fn templates_can_import_shared_files() {
             b"#import \"/_shared/x.typ\": greet\n#greet".to_vec(),
         ),
     ]);
-    let doc = common::compile_in(&p, "/t/main.typ", &json!({})).unwrap();
+    let doc = common::compile_in(&p, "/t/main.typ", &json!({}), &Default::default()).unwrap();
     assert!(all_text(&doc).contains("shared ok"));
 }
 
@@ -164,7 +165,13 @@ ok"#
             .to_vec(),
         ),
     ]);
-    common::compile_in(&p, "/t/main.typ", &json!({ "a": "৪২" })).unwrap();
+    common::compile_in(
+        &p,
+        "/t/main.typ",
+        &json!({ "a": "৪২" }),
+        &Default::default(),
+    )
+    .unwrap();
 }
 
 #[test]

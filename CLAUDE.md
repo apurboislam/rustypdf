@@ -11,8 +11,9 @@ Design docs:
 - `PLAN.md` says **what** to build and why (the source of truth for decisions);
 - `BUILD.md` says **in what order**, as phases P0–P9, each with a task checklist and "Done when" criteria.
 
-P0–P3 are done (render core, Bangla + English, HTTP API). Continue with P4 in
-`BUILD.md` order, and tick its checkboxes as tasks land. When a decision
+P0–P5 are done (render core, Bangla + English, HTTP API, static images +
+manifest + schema, URL images). Continue with P6 in `BUILD.md` order, and tick
+its checkboxes as tasks land. When a decision
 changes, update `PLAN.md` in the same change.
 
 ## Commands (`justfile`)
@@ -20,7 +21,7 @@ changes, update `PLAN.md` in the same change.
 ```bash
 just fmt / just lint / just test / just run / just docker
 cargo test <test_name>                      # single test
-cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs: api, render, golden)
+cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs: api, images, render, golden)
 just golden-update                          # re-approve golden PNGs (only on purpose, give a reason in the PR)
 just pdfa                                   # render every templates/*/sample.json + veraPDF 3b
 cargo run -- render <template-dir> <data.json> -o out.pdf   # dev CLI: render without HTTP
@@ -33,9 +34,13 @@ Without env vars, `TEMPLATES_DIR`/`FONTS_DIR` fall back to `./templates` and
 `./fonts` when `/templates` and `/fonts` don't exist.
 
 Tests: `tests/common/mod.rs` has shared helpers (fonts loaded once, fixed
-timestamp). `tests/fixtures/templates/` holds API-test templates (`greet`,
-`broken`, `slow` whose loop count comes from `data.n`, so tests avoid comemo
-cache hits).
+timestamp, `state_with`/`state_with_mock`, `send`). `tests/fixtures/templates/`
+holds API-test templates: `greet`, `broken`, `slow` (loop count from `data.n`,
+so tests avoid comemo cache hits), `missing-asset`, `bad-manifest` (skipped at
+load) and `photo-test` (route `photos`: logo, manifest image fields, schema,
+sample). URL-image tests use `wiremock` plus `Fetcher::with_test_overrides`,
+which maps only the host `img.test` to the mock server; every other host,
+including `localhost` and IP literals, stays SSRF-guarded.
 
 ## Architecture (big picture)
 
@@ -75,9 +80,12 @@ The Typst project root is `/templates`, so templates can import
 `/_shared/...`. File access outside it is rejected. Templates never touch the
 network; only `images/fetch.rs` does.
 
-`TemplateRegistry` (`src/registry.rs`) is an `ArcSwap<HashMap>`:
+`TemplateRegistry` (`src/registry.rs`) is an `ArcSwap<HashMap>` keyed by route:
 - every folder in `TEMPLATES_DIR` that contains `main.typ` becomes a template
-  served at `POST /render/{name}`. Folders starting with `_` are not templates;
+  served at `POST /render/{route}` (the folder name unless `manifest.toml`
+  sets `route`). Folders starting with `_` are not templates. A template with
+  an invalid `manifest.toml`/`schema.json`, a bad fallback, or a duplicate
+  route is skipped with an error log;
 - hot reload (`notify`) rebuilds the registry and swaps it atomically. A
   template that breaks on reload keeps its previous version.
 

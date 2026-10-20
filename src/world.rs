@@ -78,6 +78,11 @@ impl ProjectFiles {
         self.files.get(vpath).map(|f| &f.bytes)
     }
 
+    /// Drops a file from the snapshot, so templates can no longer read it.
+    pub fn remove(&mut self, vpath: &str) {
+        self.files.remove(vpath);
+    }
+
     /// Virtual paths of all cached files.
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.files.keys().map(String::as_str)

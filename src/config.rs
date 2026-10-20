@@ -24,6 +24,7 @@ pub struct Config {
     pub image_cache_mb: u64,
     pub image_allowed_hosts: Vec<String>,
     pub hot_reload: bool,
+    pub preview: bool,
 }
 
 impl Config {
@@ -58,6 +59,14 @@ impl Config {
                 })
                 .unwrap_or_default()
         };
+        let flag = |key: &str, default: bool| -> Result<bool> {
+            match get(key).as_deref() {
+                None => Ok(default),
+                Some("1" | "true" | "yes" | "on") => Ok(true),
+                Some("0" | "false" | "no" | "off") => Ok(false),
+                Some(v) => bail!("{key}={v:?} must be true or false"),
+            }
+        };
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
 
         let config = Self {
@@ -82,12 +91,8 @@ impl Config {
                 .into_iter()
                 .map(|h| h.to_ascii_lowercase())
                 .collect(),
-            hot_reload: match get("HOT_RELOAD").as_deref() {
-                None => true,
-                Some("1" | "true" | "yes" | "on") => true,
-                Some("0" | "false" | "no" | "off") => false,
-                Some(v) => bail!("HOT_RELOAD={v:?} must be true or false"),
-            },
+            hot_reload: flag("HOT_RELOAD", true)?,
+            preview: flag("PREVIEW", true)?,
         };
         if config.max_concurrency == 0 {
             bail!("MAX_CONCURRENCY must be at least 1");
@@ -128,6 +133,7 @@ mod tests {
         assert!(c.image_allowed_hosts.is_empty());
         assert_eq!(c.render_timeout, Duration::from_secs(10));
         assert!(c.hot_reload);
+        assert!(c.preview);
         assert!(c.max_concurrency >= 1);
     }
 
@@ -150,5 +156,7 @@ mod tests {
         assert!(config(&[("PORT", "x")]).is_err());
         assert!(config(&[("MAX_CONCURRENCY", "0")]).is_err());
         assert!(config(&[("HOT_RELOAD", "maybe")]).is_err());
+        assert!(config(&[("PREVIEW", "maybe")]).is_err());
+        assert!(!config(&[("PREVIEW", "off")]).unwrap().preview);
     }
 }

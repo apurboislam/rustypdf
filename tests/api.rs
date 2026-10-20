@@ -2,36 +2,16 @@
 
 mod common;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use http_body_util::BodyExt;
+use common::{get, json_body, post_json, send, state_with};
 use rustypdf::api::{self, AppState};
 use rustypdf::config::Config;
-use serde_json::{Value, json};
-use tower::ServiceExt;
-
-fn state_with(vars: &[(&str, &str)]) -> Arc<AppState> {
-    let fixtures = common::repo().join("tests/fixtures/templates");
-    let fonts = common::repo().join("fonts");
-    let mut all: Vec<(String, String)> = vec![
-        ("TEMPLATES_DIR".into(), fixtures.display().to_string()),
-        ("FONTS_DIR".into(), fonts.display().to_string()),
-    ];
-    all.extend(vars.iter().map(|(k, v)| (k.to_string(), v.to_string())));
-    let config = Config::from_lookup(|k| {
-        all.iter()
-            .rev()
-            .find(|(key, _)| key == k)
-            .map(|(_, v)| v.clone())
-    })
-    .unwrap();
-    AppState::load(config).unwrap()
-}
+use serde_json::json;
 
 fn app(vars: &[(&str, &str)]) -> Router {
     api::router(state_with(vars))
@@ -41,30 +21,6 @@ fn app(vars: &[(&str, &str)]) -> Router {
 fn unique_n(base: u64) -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     base + NEXT.fetch_add(1, Ordering::SeqCst)
-}
-
-fn post_json(uri: &str, body: &Value) -> Request<Body> {
-    Request::post(uri)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(serde_json::to_vec(body).unwrap()))
-        .unwrap()
-}
-
-fn get(uri: &str) -> Request<Body> {
-    Request::get(uri).body(Body::empty()).unwrap()
-}
-
-async fn send(app: &Router, req: Request<Body>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    let res = app.clone().oneshot(req).await.unwrap();
-    let status = res.status();
-    let headers = res.headers().clone();
-    let body = res.into_body().collect().await.unwrap().to_bytes().to_vec();
-    (status, headers, body)
-}
-
-fn json_body(body: &[u8]) -> Value {
-    serde_json::from_slice(body)
-        .unwrap_or_else(|_| panic!("not JSON: {}", String::from_utf8_lossy(body)))
 }
 
 #[tokio::test]
@@ -253,7 +209,11 @@ async fn templates_listing() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["broken", "greet", "slow"]);
+    // `bad-manifest` is skipped; `photo-test` is served at its manifest route.
+    assert_eq!(
+        names,
+        ["broken", "greet", "missing-asset", "photos", "slow"]
+    );
 
     let (status, _, body) = send(&app, get("/templates/broken")).await;
     assert_eq!(status, StatusCode::OK);
@@ -280,7 +240,7 @@ async fn health_and_readiness() {
 
     let (status, _, body) = send(&app, get("/readyz")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json_body(&body)["templates"], 3);
+    assert_eq!(json_body(&body)["templates"], 5);
 
     state.ready.store(false, Ordering::SeqCst);
     let (status, _, _) = send(&app, get("/readyz")).await;

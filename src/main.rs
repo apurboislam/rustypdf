@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -7,8 +6,10 @@ use clap::{Parser, Subcommand};
 
 use rustypdf::config::Config;
 use rustypdf::fonts::FontStore;
+use rustypdf::images::{self, fetch::Fetcher};
+use rustypdf::registry;
 use rustypdf::render::{self, RenderInput};
-use rustypdf::world::{ProjectFiles, Shared};
+use rustypdf::world::Shared;
 
 #[derive(Parser)]
 #[command(version, about = "Render Typst templates into PDF/A-3b from JSON")]
@@ -86,24 +87,54 @@ fn render_cli(
 
     let fonts = FontStore::load(&config.fonts_dir, &config.required_fonts)?;
     let shared = Shared::new(Arc::new(fonts));
-    let project =
-        ProjectFiles::load(root).with_context(|| format!("cannot read {}", root.display()))?;
-    let mut json: serde_json::Value = serde_json::from_slice(
+    let template = Arc::new(registry::load_one(root, &name, &shared)?);
+    let json: serde_json::Value = serde_json::from_slice(
         &std::fs::read(data).with_context(|| format!("cannot read {}", data.display()))?,
     )
     .with_context(|| format!("{} is not valid JSON", data.display()))?;
-    render::normalize_nfc(&mut json);
 
-    let main = format!("/{name}/main.typ");
-    let images = HashMap::new();
+    // The same steps as the service: validate, normalize, resolve images.
+    if let Err(errors) = template.validate(&json) {
+        for e in &errors {
+            eprintln!("invalid input at {:?}: {}", e.path, e.msg);
+        }
+        bail!("{} does not match {name}/schema.json", data.display());
+    }
+    let mut json = json;
+    render::normalize_nfc(&mut json);
+    let limits = images::Limits {
+        max_per_request: config.image_max_per_request,
+        fetch_concurrency: config.image_fetch_concurrency,
+        max_bytes: config.image_max_bytes,
+    };
+    let fetcher = Fetcher::new(config);
+    let runtime = tokio::runtime::Runtime::new()?;
+    let (json, resolved) = runtime
+        .block_on(images::resolve(template.clone(), json, &fetcher, limits))
+        .map_err(|errors| {
+            for e in &errors {
+                eprintln!(
+                    "image error: {}",
+                    serde_json::to_string(e).unwrap_or_default()
+                );
+            }
+            anyhow::anyhow!("images could not be loaded")
+        })?;
+    for w in &resolved.warnings {
+        eprintln!(
+            "image warning (fallback used): {}",
+            serde_json::to_string(w)?
+        );
+    }
+
     let start = std::time::Instant::now();
     let result = render::render(
         &shared,
         &RenderInput {
-            project: &project,
-            main: &main,
+            project: &template.project,
+            main: &template.main,
             data: &json,
-            images: &images,
+            images: &resolved.images,
             now: chrono::Utc::now(),
         },
     );
