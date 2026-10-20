@@ -32,7 +32,14 @@ enum Command {
         /// Output PDF path.
         #[arg(short, long, default_value = "out.pdf")]
         output: PathBuf,
+        /// Dev only: send image requests for HOST to ADDR (e.g. a local mock
+        /// image server), skipping the DNS SSRF check for that host only.
+        #[arg(long = "resolve", value_name = "HOST=ADDR")]
+        resolve: Vec<String>,
     },
+    /// Exit 0 if `GET /healthz` on the local service answers 200 (for
+    /// container health checks; the runtime image has no curl).
+    Healthcheck,
 }
 
 fn main() -> Result<()> {
@@ -48,7 +55,25 @@ fn main() -> Result<()> {
             template_dir,
             data,
             output,
-        } => render_cli(&config, &template_dir, &data, &output),
+            resolve,
+        } => render_cli(&config, &template_dir, &data, &output, &resolve),
+        Command::Healthcheck => healthcheck(config.port),
+    }
+}
+
+fn healthcheck(port: u16) -> Result<()> {
+    use std::io::{Read, Write};
+    let timeout = std::time::Duration::from_secs(2);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+    let mut head = [0u8; 12];
+    stream.read_exact(&mut head)?;
+    if head.starts_with(b"HTTP/1.1 200") {
+        Ok(())
+    } else {
+        bail!("unhealthy: {}", String::from_utf8_lossy(&head))
     }
 }
 
@@ -73,6 +98,7 @@ fn render_cli(
     template_dir: &std::path::Path,
     data: &std::path::Path,
     output: &std::path::Path,
+    resolve: &[String],
 ) -> Result<()> {
     let template_dir = template_dir
         .canonicalize()
@@ -107,7 +133,19 @@ fn render_cli(
         fetch_concurrency: config.image_fetch_concurrency,
         max_bytes: config.image_max_bytes,
     };
-    let fetcher = Fetcher::new(config);
+    let overrides = resolve
+        .iter()
+        .map(|r| {
+            let (host, addr) = r
+                .split_once('=')
+                .with_context(|| format!("--resolve {r:?} must be HOST=ADDR"))?;
+            let addr: std::net::SocketAddr = addr
+                .parse()
+                .with_context(|| format!("--resolve {r:?}: {addr:?} is not IP:PORT"))?;
+            Ok((host, addr))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let fetcher = Fetcher::with_dns_overrides(config, &overrides);
     let runtime = tokio::runtime::Runtime::new()?;
     let (json, resolved) = runtime
         .block_on(images::resolve(template.clone(), json, &fetcher, limits))

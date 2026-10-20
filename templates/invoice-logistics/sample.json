@@ -1,0 +1,40 @@
+{
+  "invoice_no": "DX-2026-77120",
+  "date": "2026-10-20",
+  "company": {
+    "name": "ঢাকা এক্সপ্রেস লজিস্টিকস / Dhaka Express Logistics",
+    "address": "প্লট ৮, তেজগাঁও শিল্প এলাকা, ঢাকা ১২০৮",
+    "phone": "+880 9612-345678",
+    "email": "billing@dhakaexpress.example",
+    "bin": "001987654-0303"
+  },
+  "shipment": {
+    "tracking_no": "DX7712045BD",
+    "origin": "ঢাকা / Dhaka",
+    "destination": "চট্টগ্রাম / Chattogram",
+    "mode": "সড়ক / Road",
+    "service": "Express 24h",
+    "pieces": 3,
+    "weight_kg": "42.5"
+  },
+  "consignor": {
+    "name": "রূপসা টেক্সটাইল / Rupsha Textiles",
+    "address": "গাজীপুর চৌরাস্তা, গাজীপুর",
+    "phone": "01712-111222"
+  },
+  "consignee": {
+    "name": "কর্ণফুলী ফ্যাশন হাউস / Karnaphuli Fashion House",
+    "address": "আগ্রাবাদ বাণিজ্যিক এলাকা, চট্টগ্রাম",
+    "phone": "01819-333444"
+  },
+  "charges": [
+    { "description": "মালামাল ভাড়া / Freight (42.5 kg × 60)", "amount": "2550" },
+    { "description": "জ্বালানি সারচার্জ / Fuel surcharge (10%)", "amount": "255" },
+    { "description": "বিমা / Insurance", "amount": "120" },
+    { "description": "লোডিং-আনলোডিং / Handling", "amount": "200" },
+    { "description": "দ্রুত ডেলিভারি / Express delivery", "amount": "300" }
+  ],
+  "vat_percent": 15,
+  "cod_amount": "15000",
+  "notes": "মালামাল গ্রহণের সময় প্যাকেজ পরীক্ষা করুন। Claims must be made within 3 days of delivery."
+}

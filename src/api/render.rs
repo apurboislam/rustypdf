@@ -13,6 +13,7 @@ use serde_json::Value;
 use super::AppState;
 use crate::error::{AppError, FieldError};
 use crate::images::{self, ImageIssue};
+use crate::metrics::InFlight;
 use crate::registry::Template;
 use crate::render::{self, RenderInput};
 
@@ -114,9 +115,16 @@ pub async fn run(
     let name = template.route.clone();
     let deadline = template.render_timeout(state.config.render_timeout);
     let images = resolved.images;
+    let in_flight = InFlight::start(&state.metrics.renders_in_flight);
+    let histogram = state
+        .metrics
+        .render_seconds
+        .with_label_values(&[name.as_str()]);
     let task = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        render::render(
+        let _in_flight = in_flight;
+        let start = Instant::now();
+        let result = render::render(
             &shared,
             &RenderInput {
                 project: &template.project,
@@ -125,7 +133,9 @@ pub async fn run(
                 images: &images,
                 now: chrono::Utc::now(),
             },
-        )
+        );
+        histogram.observe(start.elapsed().as_secs_f64());
+        result
     });
     let rendered = tokio::time::timeout(deadline, task)
         .await

@@ -12,7 +12,6 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use moka::Expiry;
@@ -24,6 +23,7 @@ use typst::foundations::Bytes;
 use super::assets::Image;
 use super::resize;
 use crate::config::Config;
+use crate::metrics::FetchMetrics;
 
 /// Redirect hops followed per fetch.
 const MAX_REDIRECTS: usize = 3;
@@ -54,15 +54,8 @@ pub enum FetchError {
     NotImage,
     #[error("{0}")]
     Image(String),
-    #[error("request failed: {0}")]
+    #[error("{0}")]
     Network(String),
-}
-
-/// Cache hit and miss counters.
-#[derive(Debug, Default)]
-pub struct CacheStats {
-    pub hits: AtomicU64,
-    pub misses: AtomicU64,
 }
 
 pub struct Fetcher {
@@ -71,7 +64,8 @@ pub struct Fetcher {
     allowed_hosts: Arc<Vec<String>>,
     timeout: Duration,
     max_bytes: u64,
-    pub stats: CacheStats,
+    /// Fetch latency and cache hit/miss counters.
+    pub metrics: FetchMetrics,
 }
 
 struct Entry {
@@ -98,10 +92,10 @@ impl Fetcher {
     }
 
     /// Like [`Fetcher::new`], but `host -> address` overrides skip DNS and
-    /// the resolver check. Only for tests that point at a local mock server;
-    /// IP-literal URLs and every other host stay guarded.
-    #[doc(hidden)]
-    pub fn with_test_overrides(config: &Config, overrides: &[(&str, SocketAddr)]) -> Self {
+    /// the resolver check. Only for tests and the dev `render --resolve`
+    /// flag, which point at a local mock server; never set from service
+    /// config. IP-literal URLs and every other host stay guarded.
+    pub fn with_dns_overrides(config: &Config, overrides: &[(&str, SocketAddr)]) -> Self {
         Self::build(config, overrides)
     }
 
@@ -140,7 +134,7 @@ impl Fetcher {
             allowed_hosts,
             timeout: config.image_fetch_timeout,
             max_bytes: config.image_max_bytes,
-            stats: CacheStats::default(),
+            metrics: FetchMetrics::default(),
         }
     }
 
@@ -150,14 +144,20 @@ impl Fetcher {
     pub async fn fetch(&self, url: &str, max_px: Option<u32>) -> Result<Image, FetchError> {
         let key = (url.to_owned(), max_px);
         if let Some(entry) = self.cache.get(&key).await {
-            self.stats.hits.fetch_add(1, Ordering::Relaxed);
+            self.metrics.cache_hits.inc();
             return Ok(entry.image.clone());
         }
-        self.stats.misses.fetch_add(1, Ordering::Relaxed);
+        self.metrics.cache_misses.inc();
         let entry = self
             .cache
             .try_get_with(key, async {
-                let (bytes, ttl) = self.download(url).await?;
+                let start = Instant::now();
+                let downloaded = self.download(url).await;
+                self.metrics
+                    .fetch_seconds
+                    .with_label_values(&[if downloaded.is_ok() { "ok" } else { "error" }])
+                    .observe(start.elapsed().as_secs_f64());
+                let (bytes, ttl) = downloaded?;
                 let mut image = Image::new(bytes).ok_or(FetchError::NotImage)?;
                 if let Some(max_px) = max_px {
                     image = tokio::task::spawn_blocking(move || resize::downscale(image, max_px))
@@ -230,13 +230,18 @@ fn map_reqwest_error(err: reqwest::Error) -> FetchError {
         }
         source = e.source();
     }
-    let mut msg = err.to_string();
-    let mut source = std::error::Error::source(&err);
-    while let Some(e) = source {
-        msg = format!("{msg}: {e}");
-        source = e.source();
+    // The innermost cause is the useful part ("Connection refused",
+    // "failed to lookup address information: ...").
+    let mut root: &(dyn std::error::Error + 'static) = &err;
+    while let Some(e) = root.source() {
+        root = e;
     }
-    FetchError::Network(msg)
+    let kind = if err.is_connect() {
+        "connect"
+    } else {
+        "request"
+    };
+    FetchError::Network(format!("{kind} failed: {root}"))
 }
 
 /// TTL from `Cache-Control`: `no-store`/`no-cache` mean zero, `max-age=N`

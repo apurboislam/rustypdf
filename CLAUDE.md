@@ -11,9 +11,10 @@ Design docs:
 - `PLAN.md` says **what** to build and why (the source of truth for decisions);
 - `BUILD.md` says **in what order**, as phases P0–P9, each with a task checklist and "Done when" criteria.
 
-P0–P5 are done (render core, Bangla + English, HTTP API, static images +
-manifest + schema, URL images). Continue with P6 in `BUILD.md` order, and tick
-its checkboxes as tasks land. When a decision
+P0–P7 are done (render core, Bangla + English, HTTP API, static images +
+manifest + schema, URL images, Docker + ops, sector invoice templates).
+Continue with P8 in `BUILD.md` order, and tick its checkboxes as tasks land.
+How to write a template: `docs/templates.md`. When a decision
 changes, update `PLAN.md` in the same change.
 
 ## Commands (`justfile`)
@@ -21,15 +22,17 @@ changes, update `PLAN.md` in the same change.
 ```bash
 just fmt / just lint / just test / just run / just docker
 cargo test <test_name>                      # single test
-cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs: api, images, render, golden)
+cargo test --test <file> <test_name>        # single integration test (tests/<file>.rs: api, images, ops, render, golden)
 just golden-update                          # re-approve golden PNGs (only on purpose, give a reason in the PR)
-just pdfa                                   # render every templates/*/sample.json + veraPDF 3b
-cargo run -- render <template-dir> <data.json> -o out.pdf   # dev CLI: render without HTTP
+just pdfa                                   # render every templates/*/sample.json (photos from a mock server) + veraPDF 3b
+cargo run -- render <template-dir> <data.json> -o out.pdf   # dev CLI: same pipeline as the service, no HTTP
+#   add --resolve cdn.rustypdf.test=127.0.0.1:PORT to serve sample photo URLs from a local server
 scripts/verapdf.sh out.pdf                  # veraPDF 3b (PATH verapdf, else fetched via mvn)
 ```
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy
---all-targets -D warnings`, `cargo test` (incl. golden PNGs) and `just pdfa`.
+--all-targets -D warnings`, `cargo test` (incl. golden PNGs), `just pdfa`,
+and builds the Docker image and smoke-tests it (`--read-only`, nonroot).
 Without env vars, `TEMPLATES_DIR`/`FONTS_DIR` fall back to `./templates` and
 `./fonts` when `/templates` and `/fonts` don't exist.
 
@@ -41,6 +44,9 @@ load) and `photo-test` (route `photos`: logo, manifest image fields, schema,
 sample). URL-image tests use `wiremock` plus `Fetcher::with_test_overrides`,
 which maps only the host `img.test` to the mock server; every other host,
 including `localhost` and IP literals, stays SSRF-guarded.
+`tests/golden.rs` renders every repo template's sample through the full
+pipeline (photo URLs served from `tests/fixtures/photos`) and fails if a
+template with a `sample.json` has no golden test.
 
 ## Architecture (big picture)
 
@@ -53,7 +59,9 @@ doing the expensive work once and sharing it:
 Per request, the only new inputs are the request's JSON and its images.
 
 Request flow (`src/api/render.rs`, then `images/`, then `render.rs`):
-1. Auth and body-size limit.
+1. Request ID + access log + metrics (`observe` middleware), then auth
+   (`API_KEYS`; `/healthz` and `/readyz` stay open), then the body-size limit
+   (a manifest's `max_body_kb` overrides `MAX_BODY_KB`).
 2. Validate the JSON against the template's `schema.json`. Then NFC-normalize
    all strings.
 3. **Resolve images** (`src/images/`), in parallel. For each field listed under

@@ -6,6 +6,7 @@ pub mod error;
 pub mod fonts;
 pub mod images;
 pub mod manifest;
+pub mod metrics;
 pub mod registry;
 pub mod render;
 pub mod world;

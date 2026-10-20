@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Logistics invoice",
+  "type": "object",
+  "required": ["invoice_no", "date", "company", "shipment", "consignor", "consignee", "charges"],
+  "properties": {
+    "invoice_no": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "minLength": 1 },
+    "company": { "$ref": "#/$defs/party" },
+    "consignor": { "$ref": "#/$defs/party" },
+    "consignee": { "$ref": "#/$defs/party" },
+    "shipment": {
+      "type": "object",
+      "required": ["tracking_no", "origin", "destination"],
+      "properties": {
+        "tracking_no": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "minLength": 1 },
+        "destination": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string" },
+        "service": { "type": "string" },
+        "pieces": { "$ref": "#/$defs/amount" },
+        "weight_kg": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "charges": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["description", "amount"],
+        "properties": {
+          "description": { "type": "string", "minLength": 1 },
+          "amount": { "$ref": "#/$defs/amount" }
+        }
+      }
+    },
+    "vat_percent": { "$ref": "#/$defs/amount" },
+    "cod_amount": { "$ref": "#/$defs/amount" },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "party": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "bin": { "type": "string" }
+      }
+    },
+    "amount": {
+      "description": "A number, or a string of ASCII or Bangla digits (printed as sent).",
+      "anyOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^[0-9০-৯][0-9০-৯,]*(\\.[0-9০-৯]+)?$" }
+      ]
+    }
+  }
+}

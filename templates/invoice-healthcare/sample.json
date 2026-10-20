@@ -1,0 +1,30 @@
+{
+  "bill_no": "NC-২০২৬-০৪৫৬",
+  "date": "২০/১০/২০২৬",
+  "clinic": {
+    "name": "নির্ময় ক্লিনিক / Nirmoy Clinic",
+    "address": "১৫ সাত মসজিদ রোড, মোহাম্মদপুর, ঢাকা ১২০৭",
+    "phone": "০১৯১১-৫৫৫৬৬৬",
+    "bin": "০০৪৫৬৭৮৯১-০২০১"
+  },
+  "patient": {
+    "name": "ফাতেমা খাতুন / Fatema Khatun",
+    "age": "৩৪ বছর",
+    "sex": "মহিলা / Female",
+    "id": "PID-০০৯১২",
+    "phone": "০১৭১২-৩৪৫৬৭৮"
+  },
+  "doctor": "ডা. আনিসুর রহমান (MBBS, FCPS — Medicine)",
+  "department": "মেডিসিন / Medicine",
+  "services": [
+    { "code": "CONS", "description": "পরামর্শ ফি / Consultation fee", "qty": "১", "price": "১০০০" },
+    { "code": "CBC", "description": "কমপ্লিট ব্লাড কাউন্ট / Complete blood count", "qty": "১", "price": "৪০০" },
+    { "code": "FBS", "description": "রক্তে শর্করা (খালি পেটে) / Fasting blood sugar", "qty": "১", "price": "২০০" },
+    { "code": "ECG", "description": "ইসিজি / Electrocardiogram", "qty": "১", "price": "৫০০" },
+    { "code": "XR-CH", "description": "বুকের এক্স-রে / Chest X-ray (PA view)", "qty": "১", "price": "৬৫০" },
+    { "code": "INJ", "description": "ইনজেকশন প্রয়োগ / Injection service", "qty": "২", "price": "১৫০" }
+  ],
+  "discount_percent": "১০",
+  "paid": "২০০০",
+  "notes": "রিপোর্ট আগামীকাল বিকেল ৪টার পর সংগ্রহ করুন। Collect reports after 4 pm tomorrow. বকেয়া রিপোর্ট সংগ্রহের সময় পরিশোধযোগ্য।"
+}

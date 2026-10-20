@@ -38,3 +38,30 @@ jobs:
           path: ~/.cache/rustypdf
           key: verapdf-1.28.2
       - run: scripts/check-pdfa.sh
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: rustypdf:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test (read-only, nonroot, render)
+        run: |
+          docker run -d --name rustypdf --read-only -p 8080:8080 rustypdf:ci
+          for i in $(seq 1 30); do curl -sf localhost:8080/readyz && break; sleep 1; done
+          curl -sf -X POST localhost:8080/render/hello -H 'Content-Type: application/json' \
+            -d '{"name": "রহিম"}' -o hello.pdf
+          head -c 5 hello.pdf | grep -q '%PDF-'
+          docker exec rustypdf /rustypdf healthcheck
+          docker inspect -f '{{.Config.User}}' rustypdf | grep -q nonroot
+          docker image ls rustypdf:ci --format 'image size: {{.Size}}'
+      - if: failure()
+        run: docker logs rustypdf

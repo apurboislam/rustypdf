@@ -1,5 +1,5 @@
 // Shared Bangla + English setup. Import with:
-//   #import "/_shared/lang.typ": setup, num, digits-like, bn
+//   #import "/_shared/lang.typ": setup, num, digits-like, money, bn
 //   #show: setup
 
 #let bn-font = "Noto Sans Bengali"
@@ -41,3 +41,21 @@
 
 // A Bangla paragraph, so line breaking uses Bangla rules.
 #let bn(body) = text(lang: "bn", body)
+
+// A money amount with two decimals and South Asian grouping
+// (1234567.5 → "12,34,567.50"), in the digit system of `ref`.
+#let money(n, ref) = {
+  let cents = calc.round(calc.abs(n) * 100)
+  let whole = str(int(calc.floor(cents / 100)))
+  let frac = str(int(calc.rem(cents, 100)))
+  if frac.len() < 2 { frac = "0" + frac }
+  let head = whole.slice(0, calc.max(0, whole.len() - 3))
+  let groups = (whole.slice(calc.max(0, whole.len() - 3)),)
+  while head.len() > 2 {
+    groups.insert(0, head.slice(head.len() - 2))
+    head = head.slice(0, head.len() - 2)
+  }
+  if head.len() > 0 { groups.insert(0, head) }
+  let sign = if n < 0 and cents > 0 { "-" } else { "" }
+  digits-like(sign + groups.join(",") + "." + frac, ref)
+}

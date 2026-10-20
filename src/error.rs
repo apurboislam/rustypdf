@@ -19,8 +19,14 @@ pub struct FieldError {
     pub msg: String,
 }
 
+/// Response extension naming the error kind, read by the metrics layer.
+#[derive(Debug, Clone, Copy)]
+pub struct ErrorKind(pub &'static str);
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("missing or invalid API key")]
+    Unauthorized,
     #[error("unknown template {0:?}")]
     TemplateNotFound(String),
     #[error("template {0:?} has no sample.json")]
@@ -46,6 +52,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::TemplateNotFound(_) | Self::NoSample(_) | Self::RouteNotFound(_) => {
                 StatusCode::NOT_FOUND
             }
@@ -60,6 +67,7 @@ impl AppError {
 
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Unauthorized => "unauthorized",
             Self::TemplateNotFound(_) | Self::NoSample(_) | Self::RouteNotFound(_) => "not_found",
             Self::PayloadTooLarge { .. } => "payload_too_large",
             Self::Validation(_) => "validation",
@@ -87,11 +95,20 @@ impl IntoResponse for AppError {
         }
         let body = json!({ "error": self.kind(), "message": self.to_string(), "details": details });
         let mut response = (status, axum::Json(body)).into_response();
-        if matches!(self, Self::Overloaded) {
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        match self {
+            Self::Overloaded => {
+                response
+                    .headers_mut()
+                    .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            }
+            Self::Unauthorized => {
+                response
+                    .headers_mut()
+                    .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+            }
+            _ => {}
         }
+        response.extensions_mut().insert(ErrorKind(self.kind()));
         response
     }
 }

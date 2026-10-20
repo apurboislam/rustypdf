@@ -133,7 +133,7 @@ pub fn state_with_mock(
     addr: std::net::SocketAddr,
 ) -> Arc<AppState> {
     let config = config_with(vars);
-    let fetcher = Fetcher::with_test_overrides(&config, &[(host, addr)]);
+    let fetcher = Fetcher::with_dns_overrides(&config, &[(host, addr)]);
     AppState::load_with(config, fetcher).unwrap()
 }
 

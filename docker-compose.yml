@@ -1,0 +1,19 @@
+# Mounted-templates mode (dev and most setups), with hot reload.
+# Build the image first: `just docker` (or `docker compose build`).
+services:
+  rustypdf:
+    image: rustypdf:latest
+    build: .
+    ports: ["8080:8080"]
+    read_only: true
+    volumes:
+      - ./templates:/templates:ro
+      # Optional extra fonts (e.g. a brand font):
+      # - ./brand-fonts:/fonts/extra:ro
+    environment:
+      API_KEYS: "change-me"
+      MAX_CONCURRENCY: "4"
+      # Optional; omit to allow any public host:
+      # IMAGE_ALLOWED_HOSTS: "cdn.example.com,*.s3.amazonaws.com"
+      HOT_RELOAD: "true"
+    stop_grace_period: 30s

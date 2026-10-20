@@ -1,0 +1,29 @@
+{
+  "invoice_no": "SB-2026-1001",
+  "date": "2026-10-20",
+  "payment": "বিকাশ / bKash",
+  "seller": {
+    "name": "শাপলা বাজার / Shapla Bazar",
+    "address": "বাড়ি ১২, রোড ৫, ধানমন্ডি, ঢাকা ১২০৫",
+    "phone": "+880 1711-000000",
+    "bin": "000123456-0101"
+  },
+  "customer": {
+    "name": "রহিম এন্টারপ্রাইজ / Rahim Enterprise",
+    "address": "মিরপুর ১০, ঢাকা ১২১৬",
+    "phone": "01811-222333"
+  },
+  "items": [
+    { "name": "মিনিকেট চাল (Rice) ৫ কেজি", "qty": 2, "unit": "bag", "price": "450", "photo": "http://cdn.rustypdf.test/p/rice.jpg" },
+    { "name": "মসুর ডাল (Lentils) ১ কেজি", "qty": 3, "unit": "kg", "price": "135", "photo": "http://cdn.rustypdf.test/p/lentils.jpg" },
+    { "name": "সয়াবিন তেল (Soybean oil) ২ লিটার", "qty": 1, "unit": "bottle", "price": "380", "photo": "http://cdn.rustypdf.test/p/oil.jpg" },
+    { "name": "চা পাতা (Tea) ৪০০ গ্রাম", "qty": 2, "unit": "pack", "price": "210.50", "photo": "http://cdn.rustypdf.test/p/tea.jpg" },
+    { "name": "সাবান (Soap)", "qty": 6, "unit": "pc", "price": "55", "photo": "http://cdn.rustypdf.test/p/soap.jpg" },
+    { "name": "ইলিশ মাছ (Hilsa) — ছবির লিংক নষ্ট / broken link", "qty": 1, "unit": "kg", "price": "1450", "photo": "http://cdn.rustypdf.test/p/missing.jpg" },
+    { "name": "বাজারের ব্যাগ (Shopping bag) — ছবি নেই / no photo", "qty": 1, "unit": "pc", "price": "20" }
+  ],
+  "discount": "100",
+  "vat_percent": 5,
+  "notes": "বিক্রিত পণ্য ৭ দিনের মধ্যে ফেরতযোগ্য। Goods are returnable within 7 days with this invoice.",
+  "signature": "assets/sign/manager.png"
+}

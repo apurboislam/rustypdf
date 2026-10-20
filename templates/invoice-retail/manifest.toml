@@ -1,0 +1,15 @@
+name = "Retail invoice / খুচরা চালান"
+max_body_kb = 512
+timeout_ms = 5000
+
+# Product photos: URLs from your CDN. A dead link prints the placeholder
+# and is reported in X-Render-Warnings instead of failing the invoice.
+[images."/items/[]/photo"]
+max_px = 400
+fallback = "/_shared/assets/no-photo.png"
+on_error = "fallback"
+
+# Optional signature: a stored file (assets/sign/...), URL or data: URI.
+[images."/signature"]
+optional = true
+on_error = "fail"

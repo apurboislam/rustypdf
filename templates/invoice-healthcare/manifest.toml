@@ -1,0 +1,3 @@
+name = "Healthcare bill / চিকিৎসা বিল"
+max_body_kb = 256
+timeout_ms = 5000

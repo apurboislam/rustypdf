@@ -4,12 +4,13 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use chrono::Utc;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::FieldError;
@@ -98,12 +99,35 @@ pub type Templates = HashMap<String, Arc<Template>>;
 
 pub struct TemplateRegistry {
     templates: ArcSwap<Templates>,
+    /// Serializes reloads (file watcher and `POST /admin/reload`).
+    reload_lock: Mutex<()>,
+}
+
+/// What a reload changed.
+#[derive(Debug, Default, Serialize)]
+pub struct ReloadSummary {
+    /// Routes served after the reload.
+    pub templates: Vec<String>,
+    /// Folders whose new version failed and whose previous version is still
+    /// served.
+    pub kept_previous: Vec<Problem>,
+    /// Folders that failed and had no previous version, so are not served.
+    pub failed: Vec<Problem>,
+    /// Routes that were served before and are gone now.
+    pub removed: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Problem {
+    pub folder: String,
+    pub error: String,
 }
 
 impl TemplateRegistry {
     pub fn new(templates: Templates) -> Self {
         Self {
             templates: ArcSwap::from_pointee(templates),
+            reload_lock: Mutex::new(()),
         }
     }
 
@@ -123,6 +147,61 @@ impl TemplateRegistry {
     pub fn swap(&self, templates: Templates) {
         self.templates.store(Arc::new(templates));
     }
+
+    /// Re-scans `dir` and swaps in the result atomically. A template whose
+    /// new version fails to load or to compile its sample keeps its previous
+    /// version; requests in flight finish with the version they started on.
+    pub fn reload(&self, dir: &Path, shared: &Shared) -> Result<ReloadSummary> {
+        let _guard = self.reload_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let report = scan(dir, shared)?;
+        let old = self.templates.load_full();
+        let previous = |folder: &str| old.values().find(|t| t.name == folder).cloned();
+
+        let mut summary = ReloadSummary::default();
+        let mut next: Templates = HashMap::new();
+        let keep = |prev: Arc<Template>, next: &mut Templates| {
+            next.entry(prev.route.clone()).or_insert(prev);
+        };
+        for t in report.templates.into_values() {
+            match previous(&t.name) {
+                Some(prev) if !t.startup_errors.is_empty() && prev.startup_errors.is_empty() => {
+                    tracing::error!(template = %t.name, errors = ?t.startup_errors, "reload failed; keeping the previous version");
+                    summary.kept_previous.push(Problem {
+                        folder: t.name.clone(),
+                        error: t
+                            .startup_errors
+                            .first()
+                            .map_or_else(String::new, |d| d.message.clone()),
+                    });
+                    keep(prev, &mut next);
+                }
+                _ => {
+                    next.insert(t.route.clone(), t);
+                }
+            }
+        }
+        for (folder, error) in report.failed {
+            match previous(&folder) {
+                Some(prev) => {
+                    tracing::error!(template = %folder, %error, "reload failed; keeping the previous version");
+                    summary.kept_previous.push(Problem { folder, error });
+                    keep(prev, &mut next);
+                }
+                None => summary.failed.push(Problem { folder, error }),
+            }
+        }
+
+        summary.removed = old
+            .keys()
+            .filter(|route| !next.contains_key(*route))
+            .cloned()
+            .collect();
+        summary.removed.sort();
+        summary.templates = next.keys().cloned().collect();
+        summary.templates.sort();
+        self.swap(next);
+        Ok(summary)
+    }
 }
 
 /// Scans `dir`, loading every file into one shared snapshot, and test-compiles
@@ -131,6 +210,16 @@ impl TemplateRegistry {
 /// A template whose `manifest.toml` or `schema.json` is invalid is skipped
 /// with an error log; so is a template whose route another template uses.
 pub fn load(dir: &Path, shared: &Shared) -> Result<Templates> {
+    Ok(scan(dir, shared)?.templates)
+}
+
+/// The templates that loaded, and `(folder, error)` for those that did not.
+struct ScanReport {
+    templates: Templates,
+    failed: Vec<(String, String)>,
+}
+
+fn scan(dir: &Path, shared: &Shared) -> Result<ScanReport> {
     let (project, assets) = load_project(dir)?;
 
     let mut names: Vec<String> = project
@@ -143,26 +232,28 @@ pub fn load(dir: &Path, shared: &Shared) -> Result<Templates> {
     names.sort();
 
     let mut templates: Templates = HashMap::new();
+    let mut failed = Vec::new();
     for name in names {
         let template = match load_template(&name, &project, &assets, shared) {
             Ok(t) => t,
             Err(err) => {
                 tracing::error!(template = %name, error = %err, "skipping template");
+                failed.push((name, err));
                 continue;
             }
         };
         if let Some(other) = templates.get(&template.route) {
-            tracing::error!(
-                template = %name,
-                route = %template.route,
-                other = %other.name,
-                "skipping template: route already used"
+            let err = format!(
+                "route {:?} is already used by {}",
+                template.route, other.name
             );
+            tracing::error!(template = %name, error = %err, "skipping template");
+            failed.push((name, err));
             continue;
         }
         templates.insert(template.route.clone(), Arc::new(template));
     }
-    Ok(templates)
+    Ok(ScanReport { templates, failed })
 }
 
 /// Loads one template folder `name` under `dir` (the dev CLI).

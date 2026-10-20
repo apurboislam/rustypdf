@@ -1,0 +1,31 @@
+{
+  "bill_no": "BB/RA-০৩",
+  "date": "৩১/১০/২০২৬",
+  "contractor": {
+    "name": "ভিত বিল্ডার্স লিমিটেড / Bhit Builders Ltd.",
+    "address": "৪৫ কাকরাইল, রমনা, ঢাকা ১০০০",
+    "phone": "০২-৯৮৭৬৫৪৩",
+    "bin": "০০২৩৪৫৬৭৮-০১০১"
+  },
+  "client": {
+    "name": "সবুজ আবাসন প্রকল্প / Sabuj Housing Project",
+    "address": "পূর্বাচল নতুন শহর, সেক্টর ১২, নারায়ণগঞ্জ"
+  },
+  "project": {
+    "name": "সবুজ টাওয়ার — ১০ তলা আবাসিক ভবন / Sabuj Tower (G+9)",
+    "site": "প্লট ২১৪, সেক্টর ১২, পূর্বাচল",
+    "work_order": "SHP/WO/২০২৬/০৪৪",
+    "period": "০১/১০/২০২৬ – ৩১/১০/২০২৬"
+  },
+  "items": [
+    { "code": "১.০১", "description": "মাটি খনন (ভিত্তি) / Earth excavation for foundation", "unit": "ঘনমিটার / m³", "qty": "১২০", "rate": "৩৫০" },
+    { "code": "২.০৩", "description": "পাইল ক্যাপের ঢালাই (আরসিসি ১:১.৫:৩) / RCC in pile caps", "unit": "ঘনমিটার / m³", "qty": "৪৫.৫", "rate": "১২৫০০" },
+    { "code": "৩.১০", "description": "রড বাঁধাই (৫০০ গ্রেড) / Reinforcement, grade 500", "unit": "মেট্রিক টন / t", "qty": "৮.২৫", "rate": "৯৮০০০" },
+    { "code": "৪.০২", "description": "ইটের গাঁথুনি (২৫০ মিমি) / Brick masonry, 250 mm", "unit": "ঘনমিটার / m³", "qty": "৬০", "rate": "৮৭০০" },
+    { "code": "৫.০৭", "description": "শাটারিং ও সেন্টারিং / Shuttering and centering", "unit": "বর্গমিটার / m²", "qty": "৩৪০", "rate": "৬৫০" }
+  ],
+  "vat_percent": "৭.৫",
+  "retention_percent": "৫",
+  "advance_adjustment": "১৫০০০০",
+  "previous_bills": "২৪৫০০০০"
+}

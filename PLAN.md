@@ -87,7 +87,8 @@ template and one endpoint:
 ```
 templates/
 ├── _shared/
-│   ├── lang.typ          # shared font setup, digit-aware number helpers
+│   ├── lang.typ          # shared font setup, digit-aware number helpers, money()
+│   ├── invoice.typ       # invoice layout blocks shared by the sector invoices
 │   └── assets/           # static images shared by all templates
 │       ├── no-photo.png  #   fallback for missing product photos
 │       └── stamp.png     #   company stamp used on every invoice
@@ -388,15 +389,25 @@ invoice that uses the same products downloads nothing.
 | `GET`  | `/templates` | Lists templates, with schema, image fields and sample. |
 | `GET`  | `/templates/{template}` | Metadata + JSON schema for one template. |
 | `GET`  | `/preview/{template}` | Renders with `sample.json` inline (dev aid; `PREVIEW=false` disables it). |
-| `POST` | `/admin/reload` | Re-scans `/templates` (also automatic via file watcher). |
+| `POST` | `/admin/reload` | Re-scans `/templates` (also automatic via file watcher). Returns `{templates, kept_previous, failed, removed}`. |
 | `GET`  | `/healthz`, `/readyz` | Liveness and readiness (fonts loaded, templates compiled). |
 | `GET`  | `/metrics` | Prometheus metrics. See below. |
 
 `/metrics` exposes:
-- render latency per template;
-- image fetch latency and cache hit rate;
-- errors;
-- in-flight renders.
+- render latency per template (`rustypdf_render_seconds{template}`);
+- image fetch latency and cache hit rate (`rustypdf_image_fetch_seconds{result}`,
+  `rustypdf_image_cache_hits_total`, `rustypdf_image_cache_misses_total`);
+- errors (`rustypdf_errors_total{kind}`, `rustypdf_http_requests_total{status}`);
+- in-flight renders (`rustypdf_renders_in_flight`);
+- reloads (`rustypdf_template_reloads_total{result}`).
+
+**Auth:** when `API_KEYS` is set, every route except `/healthz` and
+`/readyz` needs `Authorization: Bearer <key>` (including `/metrics` and
+`/admin/reload`); otherwise `401` with `WWW-Authenticate: Bearer`.
+
+**Request IDs:** a valid incoming `X-Request-Id` (up to 64 visible ASCII
+characters) is kept, otherwise one is generated; it is returned in the
+response and attached to every log line of the request.
 
 **Request**
 ```http
@@ -418,6 +429,7 @@ Content-Type: application/json
 
 **Responses**
 - `200 application/pdf`, with headers `X-Render-Time-Ms` and `X-Fetch-Time-Ms`.
+- `401` missing or invalid API key (when auth is on).
 - `404` unknown template.
 - `413` body too large.
 - `422` validation or image error, naming the field.
@@ -429,8 +441,8 @@ Content-Type: application/json
 
 Every error body has the same shape:
 `{"error": "<kind>", "message": "...", "details": [...]}`. The kinds are
-`not_found`, `payload_too_large`, `validation`, `image`, `compile`,
-`render_timeout`, `overloaded` and `internal`. `details` holds `{path, msg}`
+`unauthorized`, `not_found`, `payload_too_large`, `validation`, `image`,
+`compile`, `render_timeout`, `overloaded` and `internal`. `details` holds `{path, msg}`
 items for validation errors and `{message, file, line, column, hint}` items
 for compile errors. A `503` also carries `Retry-After: 1`.
 
@@ -583,6 +595,18 @@ services:
 The container needs **outbound HTTPS** to reach image hosts. `reqwest` 0.13
 uses rustls with the platform verifier, which reads the system CA store;
 `distroless/cc` ships `/etc/ssl/certs`, so no extra package is needed.
+
+The actual `Dockerfile` follows this sketch, plus: it bakes the repo's
+`templates/` as defaults, sets `LOG_FORMAT=json`, and has a `HEALTHCHECK`
+that runs `/rustypdf healthcheck` (distroless has no curl). The service
+writes nothing to disk, so it runs with `--read-only`.
+
+**Hot reload:** a `notify` watcher on `TEMPLATES_DIR` waits until changes
+have been quiet for 300 ms, then rebuilds the whole registry (templates and
+static assets) and swaps it atomically. A template whose new version fails to
+load or to compile its sample keeps its previous version; a template whose
+folder disappears is removed. In-flight requests finish on the version they
+started with.
 
 Two deployment modes:
 - **Mounted templates** (dev and most setups) use the compose file above, with hot reload.

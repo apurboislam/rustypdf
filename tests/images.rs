@@ -302,14 +302,7 @@ async fn second_identical_request_makes_no_network_call() {
         assert_pdf(status, &b);
     }
     // `expect(1)` is verified when the server drops.
-    assert!(
-        state
-            .fetcher
-            .stats
-            .hits
-            .load(std::sync::atomic::Ordering::Relaxed)
-            >= 1
-    );
+    assert!(state.fetcher.metrics.cache_hits.get() >= 1);
 }
 
 #[tokio::test]

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Construction running bill",
+  "type": "object",
+  "required": ["bill_no", "date", "contractor", "client", "project", "items"],
+  "properties": {
+    "bill_no": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "minLength": 1 },
+    "contractor": { "$ref": "#/$defs/party" },
+    "client": { "$ref": "#/$defs/party" },
+    "project": {
+      "type": "object",
+      "required": ["name", "work_order"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "site": { "type": "string" },
+        "work_order": { "type": "string", "minLength": 1 },
+        "period": { "type": "string" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["description", "unit", "qty", "rate"],
+        "properties": {
+          "code": { "type": "string" },
+          "description": { "type": "string", "minLength": 1 },
+          "unit": { "type": "string", "minLength": 1 },
+          "qty": { "$ref": "#/$defs/amount" },
+          "rate": { "$ref": "#/$defs/amount" }
+        }
+      }
+    },
+    "vat_percent": { "$ref": "#/$defs/amount" },
+    "retention_percent": { "$ref": "#/$defs/amount" },
+    "advance_adjustment": { "$ref": "#/$defs/amount" },
+    "previous_bills": { "$ref": "#/$defs/amount" }
+  },
+  "$defs": {
+    "party": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "bin": { "type": "string" }
+      }
+    },
+    "amount": {
+      "description": "A number, or a string of ASCII or Bangla digits (printed as sent).",
+      "anyOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^[0-9০-৯][0-9০-৯,]*(\\.[0-9০-৯]+)?$" }
+      ]
+    }
+  }
+}

@@ -256,30 +256,34 @@ and safe.
 **Goal:** a container that is safe to run in production.
 
 **Tasks**
-- [ ] Multi-stage `Dockerfile`:
+- [x] Multi-stage `Dockerfile`:
   - `cargo-chef` for dependency caching;
   - `distroless/cc` runtime image, running as nonroot;
   - fonts baked in.
-- [ ] `docker-compose.yml` with `templates` mounted read-only and the env from PLAN.md §10.
-- [ ] API key auth (`Authorization: Bearer`, keys from `API_KEYS`). It is
+- [x] `docker-compose.yml` with `templates` mounted read-only and the env from PLAN.md §10.
+- [x] API key auth (`Authorization: Bearer`, keys from `API_KEYS`). It is
       skipped when `API_KEYS` is unset.
-- [ ] `GET /metrics` (Prometheus):
+- [x] `GET /metrics` (Prometheus):
   - render latency per template;
   - image fetch latency and cache hit rate;
   - in-flight renders;
   - errors by type.
-- [ ] Structured JSON logs with a request ID, template name and timings.
-- [ ] Hot reload (`HOT_RELOAD`): watch with `notify`, debounce, rebuild the
+- [x] Structured JSON logs with a request ID, template name and timings.
+- [x] Hot reload (`HOT_RELOAD`): watch with `notify`, debounce, rebuild the
       registry and assets, and swap atomically. A broken template keeps the
       old version and logs the error.
-- [ ] `POST /admin/reload`.
-- [ ] Check that the container runs with `--read-only` and that the image size is reasonable.
-- [ ] CI builds the Docker image.
+- [x] `POST /admin/reload`.
+- [x] Check that the container runs with `--read-only` and that the image size is reasonable.
+- [x] CI builds the Docker image.
 
 **Done when**
 - `docker compose up` runs the service and the curl examples from PLAN.md §13 work.
 - Editing a template in the mounted folder takes effect without a restart.
 - Requests without a valid key get a 401 when auth is on.
+
+*Status: done. `tests/ops.rs` covers auth, metrics, request IDs, admin and
+hot reload; the image was built and smoke-tested locally (`--read-only`,
+nonroot, compose with a mounted folder) and CI builds and smoke-tests it.*
 
 ---
 
@@ -289,18 +293,19 @@ and safe.
 output quality.
 
 **Tasks**
-- [ ] Four bilingual invoice templates, each with `main.typ`, `manifest.toml`,
+- [x] Four bilingual invoice templates, each with `main.typ`, `manifest.toml`,
       `schema.json`, `sample.json` and `assets/logo.png`:
   - `invoice-retail`, with product photos from URLs;
   - `invoice-healthcare`;
   - `invoice-logistics`;
   - `invoice-construction`.
-- [ ] Shared `_shared/assets/no-photo.png` and `stamp.png`.
-- [ ] CI jobs:
+- [x] Shared `_shared/assets/no-photo.png` and `stamp.png`.
+- [x] CI jobs:
   - render every template's `sample.json` (image URLs served by a mock server in CI);
-  - **veraPDF 3b** on every output (the `verapdf/cli` Docker image), failing the build on any violation;
+  - **veraPDF 3b** on every output (veraPDF CLI from Maven Central via
+    `scripts/verapdf.sh`, not the `verapdf/cli` Docker image), failing the build on any violation;
   - golden PNG tests for every template.
-- [ ] Add `docs/templates.md`, explaining how to write a new template:
+- [x] Add `docs/templates.md`, explaining how to write a new template:
   - folder layout;
   - `lang.typ`;
   - static vs dynamic images;
@@ -310,6 +315,13 @@ output quality.
 - All 4 templates render from their samples.
 - All outputs pass veraPDF 3b in CI.
 - Golden tests pass.
+
+*Status: done. Sample photo URLs use the reserved host `cdn.rustypdf.test`,
+served from `tests/fixtures/photos` (a `wiremock` server in the golden tests;
+`python3 -m http.server` plus the dev-only `render --resolve` flag in
+`just pdfa`). The retail sample has one deliberately broken photo link and one
+item without a photo, to show the fallback. Pending: a Bangla reader's review
+of the four new golden images.*
 
 ---
 

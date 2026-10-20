@@ -1,0 +1,3 @@
+name = "Logistics invoice / পরিবহন চালান"
+max_body_kb = 256
+timeout_ms = 5000

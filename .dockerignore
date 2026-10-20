@@ -3,3 +3,5 @@ target
 .github
 tests
 *.pdf
+docker-compose.yml
+Dockerfile

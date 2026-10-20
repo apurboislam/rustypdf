@@ -1,0 +1,3 @@
+name = "Construction running bill / নির্মাণ চলতি বিল"
+max_body_kb = 512
+timeout_ms = 8000

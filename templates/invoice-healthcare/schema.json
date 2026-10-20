@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Healthcare bill",
+  "type": "object",
+  "required": ["bill_no", "date", "clinic", "patient", "services"],
+  "properties": {
+    "bill_no": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "minLength": 1 },
+    "clinic": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "bin": { "type": "string" }
+      }
+    },
+    "patient": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "age": { "type": "string" },
+        "sex": { "type": "string" },
+        "id": { "type": "string" },
+        "phone": { "type": "string" }
+      }
+    },
+    "doctor": { "type": "string" },
+    "department": { "type": "string" },
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["description", "price"],
+        "properties": {
+          "code": { "type": "string" },
+          "description": { "type": "string", "minLength": 1 },
+          "qty": { "$ref": "#/$defs/amount" },
+          "price": { "$ref": "#/$defs/amount" }
+        }
+      }
+    },
+    "discount_percent": { "$ref": "#/$defs/amount" },
+    "paid": { "$ref": "#/$defs/amount" },
+    "notes": { "type": "string" }
+  },
+  "$defs": {
+    "amount": {
+      "description": "A number, or a string of ASCII or Bangla digits (printed as sent).",
+      "anyOf": [
+        { "type": "number", "minimum": 0 },
+        { "type": "string", "pattern": "^[0-9০-৯][0-9০-৯,]*(\\.[0-9০-৯]+)?$" }
+      ]
+    }
+  }
+}

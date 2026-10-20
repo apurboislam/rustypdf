@@ -9,8 +9,12 @@ own font (Noto Sans Bengali and Inter), even within one line.
 
 ## Status
 
-Phases P0–P3 are done: render core, Bangla + English, and the HTTP API.
-Images, manifests and schemas (P4–P5) and Docker (P6) come next.
+Phases P0–P7 are done: render core, Bangla + English, HTTP API, static and
+URL images with manifests and schemas, Docker + ops (auth, metrics, hot
+reload), and four bilingual sector invoices (`invoice-retail`,
+`invoice-healthcare`, `invoice-logistics`, `invoice-construction`).
+Performance work (P8) comes next. To write your own template, see
+[`docs/templates.md`](docs/templates.md).
 
 ## Quick start
 
@@ -22,6 +26,15 @@ curl -X POST localhost:8080/render/hello \
   -d '{"name": "রহিম", "message": "Hello from rustypdf"}' -o hello.pdf
 ```
 
+With Docker:
+
+```bash
+just docker                    # builds rustypdf:latest
+docker compose up              # templates/ mounted read-only, hot reload, API key "change-me"
+curl -X POST localhost:8080/render/hello -H 'Authorization: Bearer change-me' \
+  -H 'Content-Type: application/json' -d '{"name": "রহিম"}' -o hello.pdf
+```
+
 Render without HTTP:
 
 ```bash
@@ -31,8 +44,12 @@ cargo run -- render templates/bilingual-test templates/bilingual-test/sample.jso
 ## Templates
 
 Every folder in `TEMPLATES_DIR` that has a `main.typ` is served at
-`POST /render/{folder}`. Folders starting with `_` (e.g. `_shared`) are not
-templates. The request body is available to the template as JSON:
+`POST /render/{folder}` (or the `route` from its `manifest.toml`). Folders
+starting with `_` (e.g. `_shared`) are not templates. Optional files:
+`schema.json` (JSON Schema for the body), `manifest.toml` (name, route,
+limits, image fields), `sample.json` (used by `/preview` and the startup
+check) and `assets/` (static images). The request body is available to the
+template as JSON:
 
 ```typst
 #import "/_shared/lang.typ": setup, num, digits-like
@@ -45,24 +62,29 @@ templates. The request body is available to the template as JSON:
 
 | Method | Path | |
 |---|---|---|
-| `POST` | `/render/{template}` | JSON in, `application/pdf` out. `?filename=x.pdf`, `?inline=true`. Header `X-Render-Time-Ms`. |
-| `GET` | `/templates`, `/templates/{template}` | Template list and details, with startup compile errors. |
-| `GET` | `/healthz`, `/readyz` | Liveness and readiness. |
+| `POST` | `/render/{template}` | JSON in, `application/pdf` out. `?filename=x.pdf`, `?inline=true`. Headers `X-Render-Time-Ms`, `X-Fetch-Time-Ms`, `X-Render-Warnings` (image fallbacks), `X-Request-Id`. |
+| `GET` | `/templates`, `/templates/{template}` | Template list and details: schema, image fields, sample, startup errors. |
+| `GET` | `/preview/{template}` | Renders `sample.json` inline (`PREVIEW=false` disables). |
+| `POST` | `/admin/reload` | Re-scans the templates folder now. |
+| `GET` | `/metrics` | Prometheus metrics. |
+| `GET` | `/healthz`, `/readyz` | Liveness and readiness (never need an API key). |
 
 Errors are JSON: `{"error": "<kind>", "message": "...", "details": [...]}`.
 They use these status codes:
+- 401: missing or wrong API key (when `API_KEYS` is set);
 - 404: unknown template;
 - 413: body too large;
-- 422: invalid JSON;
+- 422: invalid JSON, schema violation (`validation`) or image error (`image`);
 - 500: compile error, with `file`/`line`/`column`, or render timeout;
 - 503: overloaded (retry).
 
 ## Configuration
 
-These environment variables are read now; PLAN.md §9 lists them all.
+PLAN.md §9 describes each one.
 
 | Var | Default |
 |---|---|
+| `API_KEYS` | unset = auth off; comma-separated bearer tokens |
 | `PORT` | `8080` |
 | `TEMPLATES_DIR` / `FONTS_DIR` | `/templates` / `/fonts` (falls back to `./templates` / `./fonts` when those don't exist) |
 | `REQUIRED_FONTS` | `Noto Sans Bengali,Inter` (missing → refuse to start) |
@@ -70,7 +92,12 @@ These environment variables are read now; PLAN.md §9 lists them all.
 | `QUEUE_TIMEOUT_MS` | `5000` |
 | `RENDER_TIMEOUT_MS` | `10000` |
 | `MAX_BODY_KB` | `1024` |
-| `LOG_FORMAT` | text; `json` for structured logs |
+| `LOG_FORMAT` | text; `json` for structured logs (the Docker image sets `json`) |
+| `IMAGE_FETCH_TIMEOUT_MS` / `IMAGE_MAX_BYTES` | `3000` / `5242880` |
+| `IMAGE_MAX_PER_REQUEST` / `IMAGE_FETCH_CONCURRENCY` | `200` / `16` |
+| `IMAGE_CACHE_MB` | `256` |
+| `IMAGE_ALLOWED_HOSTS` | unset = any public host; `*.` wildcard |
+| `HOT_RELOAD` / `PREVIEW` | `true` / `true` |
 
 ## Development
 
