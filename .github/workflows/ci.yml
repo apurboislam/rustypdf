@@ -39,6 +39,31 @@ jobs:
           key: verapdf-1.28.2
       - run: scripts/check-pdfa.sh
 
+  bench:
+    name: Benchmarks (warn on >20% regression)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain (from rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # The baseline is the last run on main. A PR compares against it and
+      # warns (never fails) on a regression; main saves a new one.
+      - uses: actions/cache/restore@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.sha }}
+          restore-keys: criterion-main-
+      - if: github.ref != 'refs/heads/main'
+        run: scripts/bench-ci.sh
+      - if: github.ref == 'refs/heads/main'
+        run: scripts/bench-ci.sh --save
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: target/criterion
+          key: criterion-main-${{ github.sha }}
+
   docker:
     name: Docker image
     runs-on: ubuntu-latest

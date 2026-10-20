@@ -23,6 +23,8 @@ pub struct Config {
     pub image_fetch_concurrency: usize,
     pub image_cache_mb: u64,
     pub image_allowed_hosts: Vec<String>,
+    /// Evict Typst's memo cache after this many renders (`crate::memo`).
+    pub memo_evict_every: u64,
     pub hot_reload: bool,
     pub preview: bool,
 }
@@ -91,11 +93,15 @@ impl Config {
                 .into_iter()
                 .map(|h| h.to_ascii_lowercase())
                 .collect(),
+            memo_evict_every: num("MEMO_EVICT_EVERY", crate::memo::DEFAULT_EVICT_EVERY)?,
             hot_reload: flag("HOT_RELOAD", true)?,
             preview: flag("PREVIEW", true)?,
         };
         if config.max_concurrency == 0 {
             bail!("MAX_CONCURRENCY must be at least 1");
+        }
+        if config.memo_evict_every == 0 {
+            bail!("MEMO_EVICT_EVERY must be at least 1");
         }
         Ok(config)
     }
@@ -155,6 +161,7 @@ mod tests {
     fn bad_values_are_errors() {
         assert!(config(&[("PORT", "x")]).is_err());
         assert!(config(&[("MAX_CONCURRENCY", "0")]).is_err());
+        assert!(config(&[("MEMO_EVICT_EVERY", "0")]).is_err());
         assert!(config(&[("HOT_RELOAD", "maybe")]).is_err());
         assert!(config(&[("PREVIEW", "maybe")]).is_err());
         assert!(!config(&[("PREVIEW", "off")]).unwrap().preview);

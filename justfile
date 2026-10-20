@@ -35,3 +35,15 @@ pdfa:
 # Build the Docker image
 docker:
     docker build -t rustypdf:latest .
+
+# Criterion render benchmarks (no HTTP); reports in target/criterion
+bench *args:
+    cargo bench --bench render -- {{args}}
+
+# In-process soak: new invoice number per render; prints latency and RSS
+soak seconds="60" threads="1":
+    cargo run --release --example soak -- {{seconds}} {{threads}}
+
+# k6 load test of the Docker image: warm, cold or soak (needs k6)
+loadtest scenario="warm":
+    scripts/loadtest.sh {{scenario}}

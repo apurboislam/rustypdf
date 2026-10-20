@@ -24,14 +24,10 @@ use crate::config::Config;
 use crate::error::{AppError, ErrorKind};
 use crate::fonts::FontStore;
 use crate::images::fetch::Fetcher;
+use crate::memo::{self, MemoEvictor};
 use crate::metrics::Metrics;
 use crate::registry::{self, ReloadSummary, TemplateRegistry};
 use crate::world::Shared;
-
-/// How often `comemo::evict` runs. Memoized results unused for
-/// `EVICT_MAX_AGE` consecutive runs are dropped.
-const EVICT_INTERVAL: Duration = Duration::from_secs(10);
-const EVICT_MAX_AGE: usize = 30;
 
 pub struct AppState {
     pub config: Config,
@@ -42,6 +38,8 @@ pub struct AppState {
     pub compile_slots: Arc<Semaphore>,
     /// URL image fetcher and its cache, shared by all requests.
     pub fetcher: Fetcher,
+    /// Bounds Typst's memo cache: evicts every `MEMO_EVICT_EVERY` renders.
+    pub memo: Arc<MemoEvictor>,
     /// Set once startup finished; cleared when shutdown begins.
     pub ready: AtomicBool,
 }
@@ -67,6 +65,7 @@ impl AppState {
             metrics,
             compile_slots: Arc::new(Semaphore::new(config.max_concurrency)),
             fetcher,
+            memo: Arc::new(MemoEvictor::new(config.memo_evict_every)),
             registry: TemplateRegistry::new(templates),
             shared,
             config,
@@ -248,11 +247,21 @@ pub async fn serve(config: Config) -> Result<()> {
     let port = config.port;
     let state = AppState::load(config)?;
 
-    tokio::spawn(async {
-        let mut tick = tokio::time::interval(EVICT_INTERVAL);
+    // Renders evict as they go (`MemoEvictor::after_render`); this releases
+    // memory once traffic stops.
+    let idle_state = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(memo::IDLE_EVICT_INTERVAL);
+        let mut last = 0;
         loop {
             tick.tick().await;
-            typst::comemo::evict(EVICT_MAX_AGE);
+            let memo = idle_state.memo.clone();
+            last = tokio::task::spawn_blocking(move || {
+                memo.idle_tick(&mut last);
+                last
+            })
+            .await
+            .unwrap_or(last);
         }
     });
 

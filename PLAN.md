@@ -54,7 +54,7 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 | Bangla/English fonts | Per-script font lists using Typst's `covers` (Unicode range regex) | Bangla characters always use the Bangla font and Latin characters always use the English font. See section 4. |
 | HTTP | `axum` + `tokio` | Fast, minimal, good ecosystem. |
 | Images | Static files in memory + URL fetch with `reqwest` (rustls, platform CA store) and a `moka` LRU cache | Static files cost no I/O per request. URLs are fetched in parallel, and repeated products load from memory. |
-| Image resizing | `image` crate with a per-field `max_px` | Large product photos are shrunk once and cached, which keeps PDFs small and rendering fast. |
+| Image resizing | `image` crate (`thumbnail`, area averaging) with a per-field `max_px` | Large product photos are shrunk once and cached, which keeps PDFs small and rendering fast. |
 | CPU work | Bounded blocking pool (`spawn_blocking` + `Semaphore`) | Typst compile is CPU-bound and must not block the async runtime. |
 | Fonts | Baked into the image and loaded **once** at startup into a shared `FontBook` | Font scanning is the most expensive cold-start step. |
 | Variable injection | A virtual file `/data.json` served by our `World` | Templates read `#let data = json("/data.json")`. Works with nested objects and arrays such as line items. |
@@ -65,17 +65,25 @@ your app ──POST /render/invoice-retail {json + image URLs}──▶ rustypdf
 2. **Warm state.** Fonts, template sources and static assets are parsed once
    and shared (`Arc`) across requests.
 3. **Typst's incremental engine (`comemo`).** Repeated compiles of the same
-   template with different data reuse memoized work. A periodic
-   `comemo::evict(n)` keeps memory bounded.
+   template with different data reuse memoized work. Most memoized results
+   belong to one request's data and are never reused, so the cache is
+   evicted every `MEMO_EVICT_EVERY` renders (`comemo::evict(1)`), which keeps
+   memory flat at any throughput (a timer would let it grow with traffic).
 4. **Images in memory.** Static template images are preloaded at startup.
    Each URL image is fetched (and resized) once, then served from the LRU
    cache. Fetches within one request run in parallel.
 5. **Parallel renders.** N concurrent renders, with N = CPU cores by default.
+6. **Build and allocator.** Release builds use fat LTO with one codegen unit,
+   and the binary uses mimalloc instead of the glibc allocator (each worth
+   roughly 7–15%).
 
 Target numbers to check in benchmarks:
 - 1–2 page invoice, warm and images cached: p50 < 15 ms, p99 < 50 ms on one core.
 - First use of a new image URL adds the network round-trip, capped by `IMAGE_FETCH_TIMEOUT_MS`.
 - Cold start: < 1 s.
+
+Measured results, the hardware and how to reproduce them:
+[`docs/performance.md`](docs/performance.md).
 
 ---
 
@@ -518,7 +526,8 @@ src/
   503 when no slot frees up in time. `RENDER_TIMEOUT_MS` sets a deadline.
 - Image fetches happen **before** the request takes a compile slot, so slow
   networks never block CPU workers.
-- A periodic `comemo::evict(30)` bounds the memo cache.
+- `comemo::evict(1)` every `MEMO_EVICT_EVERY` renders bounds the memo cache;
+  a 30 s timer also evicts once the service is idle.
 
 ---
 
@@ -541,6 +550,7 @@ src/
 | `IMAGE_FETCH_CONCURRENCY` | 16 | Parallel downloads per request |
 | `IMAGE_CACHE_MB` | 256 | Image cache budget |
 | `IMAGE_ALLOWED_HOSTS` | (unset = any public host) | Optional comma-separated allowlist, `*.` wildcard for subdomains |
+| `MEMO_EVICT_EVERY` | 16 | Evict Typst's memo cache every N renders. Keep it above the number of templates in regular use, or their shared work is evicted between requests |
 | `HOT_RELOAD` | true | Watch templates dir |
 | `PREVIEW` | true | Serve `GET /preview/{template}` |
 
@@ -690,6 +700,8 @@ const pdf = Buffer.from(await res.arrayBuffer());
 | Image host allowlist | Optional. Set `IMAGE_ALLOWED_HOSTS` to a comma-separated list. When it is unset, any public host is allowed. |
 | PDF/A-3 attachments | Not needed. The output is the PDF only. |
 | Images | Hybrid. Static images are files in the template folder; dynamic images are URLs in the request, with a per-field fallback file. |
+| Memo cache | Evicted every `MEMO_EVICT_EVERY` (16) renders, not on a timer (docs/performance.md). |
+| Allocator and build | mimalloc; release profile with fat LTO and `codegen-units = 1`. |
 
 ## 15. Open questions
 1. Are Typst `@preview` packages needed? If so, which ones should be

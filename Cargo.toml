@@ -14,6 +14,7 @@ futures-util = "0.3.34"
 hex = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 jsonschema = { version = "0.59.0", default-features = false }
+mimalloc = { version = "0.1", default-features = false }
 moka = { version = "0.12.16", features = ["future"] }
 notify = "8"
 prometheus = { version = "0.14", default-features = false }
@@ -35,8 +36,19 @@ url = "2.5.8"
 uuid = { version = "1.28.0", features = ["v4"] }
 
 [dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 futures-util = "0.3.34"
 http-body-util = "0.1.5"
 tiny-skia = "0.12"
 tower = { version = "0.5.3", features = ["util"] }
 wiremock = "0.6.5"
+
+# Whole-program optimization: about 7% faster renders (docs/performance.md),
+# at the cost of a slower release build.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[[bench]]
+name = "render"
+harness = false

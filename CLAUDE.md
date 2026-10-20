@@ -11,10 +11,11 @@ Design docs:
 - `PLAN.md` says **what** to build and why (the source of truth for decisions);
 - `BUILD.md` says **in what order**, as phases P0–P9, each with a task checklist and "Done when" criteria.
 
-P0–P7 are done (render core, Bangla + English, HTTP API, static images +
-manifest + schema, URL images, Docker + ops, sector invoice templates).
-Continue with P8 in `BUILD.md` order, and tick its checkboxes as tasks land.
-How to write a template: `docs/templates.md`. When a decision
+P0–P8 are done (render core, Bangla + English, HTTP API, static images +
+manifest + schema, URL images, Docker + ops, sector invoice templates,
+performance). P9 (extras) is optional; tick its checkboxes as tasks land.
+How to write a template: `docs/templates.md`. Speed and memory numbers and
+how to measure them: `docs/performance.md`. When a decision
 changes, update `PLAN.md` in the same change.
 
 ## Commands (`justfile`)
@@ -28,11 +29,14 @@ just pdfa                                   # render every templates/*/sample.js
 cargo run -- render <template-dir> <data.json> -o out.pdf   # dev CLI: same pipeline as the service, no HTTP
 #   add --resolve cdn.rustypdf.test=127.0.0.1:PORT to serve sample photo URLs from a local server
 scripts/verapdf.sh out.pdf                  # veraPDF 3b (PATH verapdf, else fetched via mvn)
+just bench / just soak / just loadtest      # criterion; in-process soak; k6 against the image
 ```
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy
 --all-targets -D warnings`, `cargo test` (incl. golden PNGs), `just pdfa`,
-and builds the Docker image and smoke-tests it (`--read-only`, nonroot).
+builds the Docker image and smoke-tests it (`--read-only`, nonroot), and
+runs the criterion benchmarks (`scripts/bench-ci.sh`: warns, never fails,
+on a >20% regression against the last `main` run).
 Without env vars, `TEMPLATES_DIR`/`FONTS_DIR` fall back to `./templates` and
 `./fonts` when `/templates` and `/fonts` don't exist.
 
@@ -54,7 +58,9 @@ Typst is embedded **as a library**, not called as the CLI. Speed comes from
 doing the expensive work once and sharing it:
 - fonts are loaded once into `Arc<FontStore>`;
 - template sources and assets are cached in memory;
-- Typst's `comemo` memoization carries over between requests.
+- Typst's `comemo` memoization carries over between requests, evicted every
+  `MEMO_EVICT_EVERY` renders (`src/memo.rs`). Never go back to timer-only
+  eviction: the cache grows by about 1.7 MB per render.
 
 Per request, the only new inputs are the request's JSON and its images.
 

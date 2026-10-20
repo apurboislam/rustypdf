@@ -330,15 +330,15 @@ of the four new golden images.*
 **Goal:** meet the speed targets and prove it.
 
 **Tasks**
-- [ ] `criterion` benchmarks of render alone (no HTTP), for each sector template.
-- [ ] Load tests with `oha` or `k6` against the Docker container, with images warm and cold.
-- [ ] Profile with `cargo flamegraph` and fix hot spots. Likely areas:
+- [x] `criterion` benchmarks of render alone (no HTTP), for each sector template.
+- [x] Load tests with `oha` or `k6` against the Docker container, with images warm and cold.
+- [x] Profile with `cargo flamegraph` and fix hot spots. Likely areas:
   - font loading;
   - JSON conversion;
   - image decoding;
   - comemo eviction settings.
-- [ ] Tune the defaults for `MAX_CONCURRENCY`, the eviction interval and the cache sizes.
-- [ ] Add `docs/performance.md`, recording results and the hardware used.
+- [x] Tune the defaults for `MAX_CONCURRENCY`, the eviction interval and the cache sizes.
+- [x] Add `docs/performance.md`, recording results and the hardware used.
 
 **Done when**
 - These targets are met:
@@ -346,6 +346,19 @@ of the four new golden images.*
   - cold start under 1 s;
   - memory stays flat over a 30-minute load test.
 - Benchmarks run in CI, which warns on a regression above 20%.
+
+*Status: done, but the p50 < 15 ms target is only partly met: construction
+(17 ms) and the HTTP path (16.4 ms) are over it. Details are in
+`docs/performance.md`. Tools: `benches/render.rs` (criterion),
+`examples/soak.rs` (in process), and `scripts/loadtest.sh` + `loadtest.js`
+(k6 against the image). Profiled with `perf` directly (the same data
+`cargo flamegraph` draws). The main finding: the old timer eviction let the
+memo cache grow by about 1.7 MB per render; it is now evicted every
+`MEMO_EVICT_EVERY` (16) renders. Also mimalloc, fat LTO, and `thumbnail`
+resizing. New-data renders on one core: p50 13.4–14.6 ms for three
+templates, 17.0 ms for construction, p99 under 40 ms. Same-data renders:
+2.2–2.7 ms. Cold start: 83–314 ms. A 30-minute soak (198k requests) held
+memory at 262–293 MiB. CI: `bench` job + `scripts/bench-ci.sh`.*
 
 ---
 

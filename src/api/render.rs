@@ -115,6 +115,7 @@ pub async fn run(
     let name = template.route.clone();
     let deadline = template.render_timeout(state.config.render_timeout);
     let images = resolved.images;
+    let memo = state.memo.clone();
     let in_flight = InFlight::start(&state.metrics.renders_in_flight);
     let histogram = state
         .metrics
@@ -135,6 +136,7 @@ pub async fn run(
             },
         );
         histogram.observe(start.elapsed().as_secs_f64());
+        memo.after_render();
         result
     });
     let rendered = tokio::time::timeout(deadline, task)

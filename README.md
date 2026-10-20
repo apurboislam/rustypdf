@@ -97,6 +97,7 @@ PLAN.md §9 describes each one.
 | `IMAGE_MAX_PER_REQUEST` / `IMAGE_FETCH_CONCURRENCY` | `200` / `16` |
 | `IMAGE_CACHE_MB` | `256` |
 | `IMAGE_ALLOWED_HOSTS` | unset = any public host; `*.` wildcard |
+| `MEMO_EVICT_EVERY` | `16` (evict Typst's memo cache every N renders; see `docs/performance.md`) |
 | `HOT_RELOAD` / `PREVIEW` | `true` / `true` |
 
 ## Development
@@ -106,7 +107,12 @@ just lint            # cargo fmt --check + clippy -D warnings
 just test            # all tests, including golden PNGs
 just golden-update   # re-approve golden images (only on purpose)
 just pdfa            # render every sample.json and check it with veraPDF 3b
+just bench           # criterion render benchmarks (no HTTP)
+just soak 60 1       # in-process soak: latency + memory over time
+just loadtest warm   # k6 against the Docker image (warm, cold or soak)
 ```
+
+Measured speed, memory and the hardware used: `docs/performance.md`.
 
 `just pdfa` uses `verapdf` from `PATH` if installed. Otherwise it fetches the
 veraPDF CLI from Maven Central, which needs `java` and `mvn`.

@@ -85,7 +85,15 @@ pub fn compile(
     shared: &Shared,
     input: &RenderInput,
 ) -> Result<(PagedDocument, Vec<Diagnostic>), RenderError> {
-    let data = serialize_data(input.data);
+    compile_data(shared, input, serialize_data(input.data))
+}
+
+/// [`compile`] with the request JSON already serialized.
+fn compile_data(
+    shared: &Shared,
+    input: &RenderInput,
+    data: Bytes,
+) -> Result<(PagedDocument, Vec<Diagnostic>), RenderError> {
     let world = RenderWorld::new(
         shared,
         input.project,
@@ -105,12 +113,13 @@ pub fn compile(
 
 /// Compiles the template and exports it as PDF/A-3b.
 pub fn render(shared: &Shared, input: &RenderInput) -> Result<Rendered, RenderError> {
-    let (doc, warnings) = compile(shared, input)?;
+    let data = serialize_data(input.data);
+    let (doc, warnings) = compile_data(shared, input, data.clone())?;
     let options = PdfOptions {
         // Stable per template + data, so identical requests give identical IDs.
         ident: Smart::Custom(format!(
             "{:032x}",
-            typst::utils::hash128(&(input.main, serialize_data(input.data).as_slice()))
+            typst::utils::hash128(&(input.main, data.as_slice()))
         )),
         timestamp: Some(timestamp(input.now)),
         standards: PdfStandards::new(&[PdfStandard::A_3b])
@@ -120,7 +129,6 @@ pub fn render(shared: &Shared, input: &RenderInput) -> Result<Rendered, RenderEr
     let pdf = typst_pdf::pdf(&doc, &options).map_err(|errors| {
         // Export diagnostics may point into sources; resolve them against a
         // world equal to the one used to compile.
-        let data = serialize_data(input.data);
         match RenderWorld::new(
             shared,
             input.project,
